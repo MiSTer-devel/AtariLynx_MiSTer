@@ -27,6 +27,9 @@ Most Homebrew works.
 - Orientation: rotate video by 90 or 270 degree
 - 240p mode: doubled resolution, mainly for CRT output
 
+# Rotation
+Lynx has built in rotation, supported by most games, using the Joypad Keys "Option2" + "Pause"
+
 # Savestates
 Core provides 4 slots to save the state. The first slot gets saved to disk and automatically loaded (but not applied)
 upon next load of game. Rest 3 slots are residing only in memory for temporary use.

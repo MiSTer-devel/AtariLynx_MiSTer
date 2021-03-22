@@ -52,6 +52,7 @@ architecture arch of display_dma is
    signal Reg_TIM2BKUP : std_logic_vector(TIM2BKUP.upper downto TIM2BKUP.lower) := (others => '0');
    signal Reg_DISPADRH : std_logic_vector(DISPADRH.upper downto DISPADRH.lower) := (others => '0');
    signal Reg_DISPADRL : std_logic_vector(DISPADRL.upper downto DISPADRL.lower) := (others => '0');
+   signal Reg_DISPCTL  : std_logic_vector(DISPCTL.upper  downto DISPCTL.lower ) := (others => '0');
    
    type tcolor is array (0 to 15) of std_logic_vector(11 downto 0);
    signal color : tcolor;
@@ -95,10 +96,10 @@ begin
    iSS_DMA : entity work.eReg_SS generic map ( REG_SAVESTATE_DMA ) port map (clk, SSBUS_Din, SSBUS_Adr, SSBUS_wren, SSBUS_rst, SSBUS_Dout, SS_DMA_BACK, SS_DMA); 
 
 
-   iReg_TIM2BKUP : entity work.eReg generic map ( TIM2BKUP ) port map (clk, RegBus_Din, RegBus_Adr, RegBus_wren, RegBus_rst, open, Reg_TIM2BKUP, Reg_TIM2BKUP);  
-   
+   iReg_TIM2BKUP : entity work.eReg generic map ( TIM2BKUP ) port map (clk, RegBus_Din, RegBus_Adr, RegBus_wren, RegBus_rst, open           , Reg_TIM2BKUP, Reg_TIM2BKUP);  
    iReg_DISPADRH : entity work.eReg generic map ( DISPADRH ) port map (clk, RegBus_Din, RegBus_Adr, RegBus_wren, RegBus_rst, reg_wired_or(0), Reg_DISPADRH, Reg_DISPADRH);  
    iReg_DISPADRL : entity work.eReg generic map ( DISPADRL ) port map (clk, RegBus_Din, RegBus_Adr, RegBus_wren, RegBus_rst, reg_wired_or(1), Reg_DISPADRL, Reg_DISPADRL);  
+   iReg_DISPCTL  : entity work.eReg generic map ( DISPCTL  ) port map (clk, RegBus_Din, RegBus_Adr, RegBus_wren, RegBus_rst, open           , Reg_DISPCTL , Reg_DISPCTL );  
       
    gcolorregs: for i in 0 to 15 generate
    begin
@@ -184,6 +185,9 @@ begin
                      if (currentLine = (unsigned(Reg_TIM2BKUP) - 3)) then
                         lineDMACounter <= to_unsigned(101, 7);
                         pixeladdr      <= unsigned(Reg_DISPADRH) & unsigned(Reg_DISPADRL(7 downto 2)) & "00";
+                        if (Reg_DISPCTL(1) = '1') then -- flip mode
+                           pixeladdr(1 downto 0) <= "11";
+                        end if;
                      end if;
                   
                      if (dma_new = '1') then
@@ -218,7 +222,11 @@ begin
                
                when READDONE => 
                   state      <= WRITEPIXELHIGH;
-                  pixeladdr  <= pixeladdr + 1;
+                  if (Reg_DISPCTL(1) = '1') then -- flip mode
+                     pixeladdr  <= pixeladdr - 1;
+                  else
+                     pixeladdr  <= pixeladdr + 1;
+                  end if;
                   dataBuffer <= RAM_dataRead;
                
                when WRITEPIXELHIGH =>
@@ -227,19 +235,30 @@ begin
                   pixel_out_x    <= pixel_out_x + 1;
                   pixel_out_we   <= '1';
                   pixel_out_addr <= pixel_addrNext;
-                  colorval := color(to_integer(unsigned(dataBuffer(7 downto 4))));
+                  
+                  if (Reg_DISPCTL(1) = '1') then
+                     colorval := color(to_integer(unsigned(dataBuffer(3 downto 0))));
+                  else
+                     colorval := color(to_integer(unsigned(dataBuffer(7 downto 4))));
+                  end if;
                   pixel_out_data <= colorval(3 downto 0) & colorval(11 downto 8) & colorval(7 downto 4);
                
                when WRITEPIXELLOW => 
-                  if (pixel_addrNext < 16319) then 
+                  if (pixel_addrNext < 16319) then
                      pixel_addrNext <= pixel_addrNext + 1;
-                  end if;                  
+                  end if; 
+                  
                   if (pixel_out_x < 159) then 
                      pixel_out_x    <= pixel_out_x + 1;
                   end if;
                   pixel_out_we   <= '1';
                   pixel_out_addr <= pixel_addrNext;
-                  colorval := color(to_integer(unsigned(dataBuffer(3 downto 0))));
+                  
+                  if (Reg_DISPCTL(1) = '1') then
+                     colorval := color(to_integer(unsigned(dataBuffer(7 downto 4))));
+                  else
+                     colorval := color(to_integer(unsigned(dataBuffer(3 downto 0))));
+                  end if;
                   pixel_out_data <= colorval(3 downto 0) & colorval(11 downto 8) & colorval(7 downto 4);
                   if (bytesleft > 0) then
                      state     <= READBYTE;
