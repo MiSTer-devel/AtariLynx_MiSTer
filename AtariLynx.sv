@@ -197,7 +197,7 @@ assign AUDIO_MIX = status[8:7];
 // 0         1         2         3 
 // 01234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxx         xxx
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 `include "build_id.v" 
 localparam CONF_STR = {
@@ -209,9 +209,13 @@ localparam CONF_STR = {
 	"-;",
 	"OAB,Orientation,Horz,Vert,Vert180;",
 	"OF,240p Mode,Off,On;",
+   "OGJ,CRT H-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"ODE,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"OO,Sync core to 60 Hz,Off,On;",
 	"O5,Buffer video,Off,On;",
+   "OUV,Flickerblend,Off,2 Frames,3 Frames;",
    "-;",
 	"O78,Stereo mix,none,25%,50%,100%;",
    "OP,FastForward Sound,On,Off;",
@@ -407,7 +411,7 @@ wire reset = (RESET | status[0] | buttons[1] | cart_download);
 
 reg paused;
 always_ff @(posedge clk_sys) begin
-   paused <= status[26] && OSD_STATUS && ~status[27]; // no pause when rewind capture is on
+   paused <= (syncpaused || (status[26] && OSD_STATUS)) && ~status[27]; // no pause when rewind capture is on
 end
 
 reg [8:0]  bios_wraddr;
@@ -504,7 +508,7 @@ wire [13:0] pixel_addr;
 wire [11:0] pixel_data;
 wire        pixel_we;
 
-wire sync_core = status[5];
+wire buffervideo = status[5] | status[31]; // OSD option for buffer or flickerblend on
 
 reg [11:0] vram1[16320];
 reg [11:0] vram2[16320];
@@ -512,9 +516,12 @@ reg [11:0] vram3[16320];
 reg [1:0] buffercnt_write    = 0;
 reg [1:0] buffercnt_readnext = 0;
 reg [1:0] buffercnt_read     = 0;
+reg [1:0] buffercnt_last     = 0;
+reg       syncpaused         = 0;
+
 
 always @(posedge clk_sys) begin
-   if (sync_core) begin
+   if (buffervideo) begin
       if(pixel_we && pixel_addr == 16319) begin
          buffercnt_readnext <= buffercnt_write;
          if (buffercnt_write < 2) begin
@@ -533,35 +540,85 @@ always @(posedge clk_sys) begin
       if (buffercnt_write == 1) vram2[pixel_addr] <= pixel_data;
       if (buffercnt_write == 2) vram3[pixel_addr] <= pixel_data;
    end
+   
+   if (y > 150) begin
+      syncpaused <= 0;
+   end else if (status[24] && pixel_we && pixel_addr == 16319) begin
+      syncpaused <= 1;
+   end
+
 end
 
+reg  [11:0] rgb0;
+reg  [11:0] rgb1;
+reg  [11:0] rgb2;
+
 always @(posedge CLK_VIDEO) begin
-   if (buffercnt_read == 0) rgb <= vram1[px_addr];
-   if (buffercnt_read == 1) rgb <= vram2[px_addr];
-   if (buffercnt_read == 2) rgb <= vram3[px_addr];
+   rgb0 <= vram1[px_addr];
+   rgb1 <= vram2[px_addr];
+   rgb2 <= vram3[px_addr];
 end 
 
 wire [13:0] px_addr;
-reg  [11:0] rgb;
 
+wire [11:0] rgb_last = (buffercnt_last == 0) ? rgb0 :
+                       (buffercnt_last == 1) ? rgb1 :
+                       rgb2;
 
+wire [11:0] rgb_now = (buffercnt_read == 0) ? rgb0 :
+                      (buffercnt_read == 1) ? rgb1 :
+                      rgb2;
+  
+wire [4:0] r2_5 = rgb_now[11:8] + rgb_last[11:8];
+wire [4:0] g2_5 = rgb_now[ 7:4] + rgb_last[ 7:4];
+wire [4:0] b2_5 = rgb_now[ 3:0] + rgb_last[ 3:0];  
+                                
+wire [5:0] r3_6 = rgb0[11:8] + rgb1[11:8] + rgb2[11:8];
+wire [5:0] g3_6 = rgb0[ 7:4] + rgb1[ 7:4] + rgb2[ 7:4];
+wire [5:0] b3_6 = rgb0[ 3:0] + rgb1[ 3:0] + rgb2[ 3:0];
+
+wire [7:0] r3_8 = {r3_6, r3_6[5:4]};
+wire [7:0] g3_8 = {g3_6, g3_6[5:4]};
+wire [7:0] b3_8 = {b3_6, b3_6[5:4]};
+
+wire [23:0] r3_mul24 = r3_8 * 16'D21845; 
+wire [23:0] g3_mul24 = g3_8 * 16'D21845; 
+wire [23:0] b3_mul24 = b3_8 * 16'D21845; 
+
+wire [23:0] r3_div24 = r3_mul24 / 16'D16384; 
+wire [23:0] g3_div24 = g3_mul24 / 16'D16384; 
+wire [23:0] b3_div24 = b3_mul24 / 16'D16384; 
+                  
 reg hs, vs, hbl, vbl, ce_pix;
-reg [3:0] r,g,b;
+reg [7:0] r,g,b;
 reg [1:0] orientation;
-reg [1:0] videomode; 
+reg [1:0] videomode;
+reg [8:0] x,y;
+reg [3:0] div;
+reg signed [3:0] HShift;
+reg signed [3:0] VShift; 
 
 always @(posedge CLK_VIDEO) begin
-	reg [8:0] x,y;
-	reg [3:0] div;
 
-	
    if (div < 8) div <= div + 1'd1; else div <= 0; // 64mhz / 9 => 7,11Mhz Pixelclock
 
 	ce_pix <= 0;
 	if(!div) begin
 		ce_pix <= 1;
 
-		{r,g,b} <= rgb;
+      if (status[31:30] == 0) begin // flickerblend off
+         r <= {rgb_now[11:8], rgb_now[11:8]};
+         g <= {rgb_now[7:4] , rgb_now[7:4] };
+         b <= {rgb_now[3:0] , rgb_now[3:0] };
+      end else if (status[31:30] == 1) begin // flickerblend 2 frames
+         r <= {r2_5, r2_5[4:2]};
+         g <= {g2_5, g2_5[4:2]};
+         b <= {b2_5, b2_5[4:2]};
+      end else begin // flickerblend 3 frames
+         r <= r3_div24[7:0];
+         g <= g3_div24[7:0];
+         b <= b3_div24[7:0];
+      end
 
       if (videomode == 0) begin
          if(x == 160)     hbl <= 1;
@@ -572,30 +629,22 @@ always @(posedge CLK_VIDEO) begin
          if(y == 62)      vbl <= 0;
          if(y >= 62+160)  vbl <= 1;
       end else if (videomode == 3) begin
-         if(x == 320)     hbl <= 1;
-         if(y == 40)      vbl <= 0;
-         if(y >= 40+204)  vbl <= 1;
+         if(x == 320)            hbl <= 1;
+         if(y == 40+VShift)      vbl <= 0;
+         if(y >= 40+204+VShift)  vbl <= 1;
       end
       
 		if(x == 000) begin 
-         hbl         <= 0;
-         orientation <= status[11:10];
-         if (status[15]) begin
-            videomode = 3; // 320*204, 60Hz
-         end else begin
-            if (status[11:10] == 0) videomode = 0; // 160*102, 60Hz
-            if (status[11:10] == 1) videomode = 1; // 102*160, 60Hz
-            if (status[11:10] == 2) videomode = 2; // 102*160, 60Hz, 180 degree rotated
-         end
+         hbl <= 0;
       end  
        
-		if(x == 350) begin
+		if(x == 350 + HShift) begin
 			hs <= 1;
 			if(y == 1)   vs <= 1;
 			if(y == 4)   vs <= 0;
 		end
 
-		if(x == 350+32) hs  <= 0;
+		if(x == 350+32+HShift) hs  <= 0;
 
 	end
 
@@ -626,7 +675,7 @@ always @(posedge CLK_VIDEO) begin
                px_addr <= px_addr + 1'd1;
             end
          end else begin
-            px_addr <= 8'd160 * ((y - 6'd40) / 2'd2);
+            px_addr <= 8'd160 * ((y - 6'd39 + VShift) / 2'd2);
          end
       end
 
@@ -637,6 +686,19 @@ always @(posedge CLK_VIDEO) begin
 			if (y >= 269) begin
             y              <= 0;
             buffercnt_read <= buffercnt_readnext;
+            buffercnt_last <= buffercnt_read;
+            
+            orientation <= status[11:10];
+            HShift      <= status[19:16];
+            VShift      <= status[23:20];
+            if (status[15]) begin
+               videomode = 3; // 320*204, 60Hz
+            end else begin
+               if (status[11:10] == 0) videomode = 0; // 160*102, 60Hz
+               if (status[11:10] == 1) videomode = 1; // 102*160, 60Hz
+               if (status[11:10] == 2) videomode = 2; // 102*160, 60Hz, 180 degree rotated
+            end
+            
          end
 		end
 
@@ -651,9 +713,9 @@ wire [2:0] scale = status[4:2];
 wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
 wire       scandoubler = (scale || forced_scandoubler);
 
-wire [7:0] r_in = {r,r};
-wire [7:0] g_in = {g,g};
-wire [7:0] b_in = {b,b};
+wire [7:0] r_in = r;
+wire [7:0] g_in = g;
+wire [7:0] b_in = b;
 
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (

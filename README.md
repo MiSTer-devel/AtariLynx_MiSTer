@@ -26,6 +26,15 @@ Most Homebrew works.
 - Rewind: go back up to 80 seconds in time
 - Orientation: rotate video by 90 or 270 degree
 - 240p mode: doubled resolution, mainly for CRT output
+- Flickerblend: 2 or 3 frames blending like real Lynx Screen
+
+# Refresh Rate
+Lynx uses custom refresh rates from ~50Hz up to ~79Hz.
+Some games switch between different modes.
+To compensate you can either:
+- live with tearing
+- Buffer video: triple buffering for clean image, but increases lag
+- Sync core to 60Hz: Run core at exact 60Hz output rate, no matter what internal speed is used
 
 # Rotation
 Lynx has built in rotation, supported by most games, using the Joypad Keys "Option2" + "Pause"
