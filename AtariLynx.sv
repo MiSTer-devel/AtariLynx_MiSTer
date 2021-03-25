@@ -194,10 +194,10 @@ assign VIDEO_ARY = (!ar) ? (orientation > 0 && !status[15]) ? 12'd160 : 12'd102 
 assign AUDIO_MIX = status[8:7];
 
 // Status Bit Map:
-// 0         1         2         3 
-// 01234567890123456789012345678901
-// 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+// 0         1         2         3         4         5         6 
+// 0123456789012345678901234567890101234567890123456789012345678901
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 `include "build_id.v" 
 localparam CONF_STR = {
@@ -221,6 +221,7 @@ localparam CONF_STR = {
    "OP,FastForward Sound,On,Off;",
 	"-;",
    "O9,CPU GPU Turbo,Off,On;",
+   "o01,Turbo-FF Speed,400%,133%,160%,200%;",
 	"OQ,Pause when OSD is open,Off,On;",
 	"OR,Rewind Capture,Off,On;",
 	//"OC,FPS Overlay,Off,On;",
@@ -259,7 +260,7 @@ pll pll
 
 ///////////////////////////////////////////////////
 
-wire [31:0] status;
+wire [63:0] status;
 wire  [1:0] buttons;
 wire        forced_scandoubler;
 wire        direct_video;
@@ -468,6 +469,7 @@ LynxTop LynxTop (
    //settings
    .fastforward      ( fast_forward ),
    .turbo            ( status[9]    ),
+   .speedselect      ( status[33:32]),
    .fpsoverlay_on    ( status[12]   ),
    
    // joystick

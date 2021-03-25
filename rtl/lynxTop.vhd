@@ -45,6 +45,7 @@ entity LynxTop is
       --settings
       fastforward                : in  std_logic;
       turbo                      : in  std_logic;
+      speedselect                : in  std_logic_vector(1 downto 0); -- 0 = 400%, 1 = 133%, 2 = 160%, 3 = 200%
       fpsoverlay_on              : in  std_logic;
    
       -- JOYSTICK
@@ -84,6 +85,10 @@ architecture arch of LynxTop is
    -- clock
    signal ce_counter             : unsigned (1 downto 0) := (others => '0');
    signal ce                     : std_logic := '0';
+   signal ce_fast                : std_logic := '0';
+   signal fastcounter_1_33x      : integer range 0 to 2 := 0;
+   signal fastcounter_1_6x       : integer range 0 to 4 := 0;
+   signal fastcounter_2x         : std_logic := '0';
    
    -- register
    signal RegBus_Din             : std_logic_vector(BUS_buswidth-1 downto 0);
@@ -213,16 +218,44 @@ begin
    process (clk)
    begin
       if rising_edge(clk) then
+      
+         if (fastcounter_1_33x < 2) then
+            fastcounter_1_33x <= fastcounter_1_33x + 1;
+         else
+            fastcounter_1_33x <= 0;
+         end if;
+         
+         if (fastcounter_1_6x < 4) then
+            fastcounter_1_6x <= fastcounter_1_6x + 1;
+         else
+            fastcounter_1_6x <= 0;
+         end if;
+         
+         fastcounter_2x    <= not fastcounter_2x;
+      
+         ce_fast <= '0';
+         if (fastforward = '1' or turbo = '1') then
+            case (speedselect) is
+               when "00" =>                                                        ce_fast <= '1';         -- 400%
+               when "01" => if (fastcounter_1_33x = 2)                        then ce_fast <= '1'; end if; -- 133%
+               when "10" => if (fastcounter_1_6x = 2 or fastcounter_1_6x = 4) then ce_fast <= '1'; end if; -- 160%
+               when "11" => if (fastcounter_2x = '1')                         then ce_fast <= '1'; end if; -- 200%
+               when others => null;
+            end case;
+         end if; 
          
          if (reset = '1' or sleep_savestate = '1' or sleep_rewind = '1') then
             ce         <= '0';
             ce_counter <= (others => '0');
          elsif (pause_in = '0' or ce = '1') then
             ce_counter <= ce_counter + 1;
-            if (ce_counter = "11" or (savestate_slow = '0' and rewind_active = '0' and (fastforward = '1' or turbo = '1'))) then 
-               ce <= '1'; 
-            else 
-               ce <= '0'; 
+            ce <= '0'; 
+            if (fastforward = '1' or turbo = '1') then
+               if ((ce_counter = "11" and (savestate_slow = '1' or rewind_active = '1')) or (savestate_slow = '0' and rewind_active = '0' and ce_fast = '1')) then
+                   ce <= '1';
+               end if;
+            elsif (ce_counter = "11" ) then 
+               ce <= '1';
             end if;
          end if;
          

@@ -136,6 +136,7 @@ begin
       -- settings
       fastforward                => '1',
       turbo                      => '0',
+      speedselect                => "00",
       fpsoverlay_on              => '0',
       
       -- JOYSTICK
