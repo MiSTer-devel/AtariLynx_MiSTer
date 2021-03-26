@@ -40,8 +40,8 @@ module emu
 	output        CE_PIXEL,
 
 	//Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-	output [11:0] VIDEO_ARX,
-	output [11:0] VIDEO_ARY,
+	output [12:0] VIDEO_ARX,
+	output [12:0] VIDEO_ARY,
 
 	output  [7:0] VGA_R,
 	output  [7:0] VGA_G,
@@ -52,6 +52,9 @@ module emu
 	output        VGA_F1,
 	output [1:0]  VGA_SL,
 	output        VGA_SCALER, // Force VGA scaler
+	
+	input  [11:0] HDMI_WIDTH,
+	input  [11:0] HDMI_HEIGHT,
 
 `ifdef USE_FB
 	// Use framebuffer in DDRAM (USE_FB=1 in qsf)
@@ -186,18 +189,13 @@ assign LED_POWER = 0;
 assign BUTTONS   = 0;
 assign VGA_SCALER= 0;
 
-wire [1:0] ar = status[14:13];
-
-assign VIDEO_ARX = (!ar) ? (orientation > 0 && !status[15]) ? 12'd102 : 12'd160 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? (orientation > 0 && !status[15]) ? 12'd160 : 12'd102 : 12'd0;
-
 assign AUDIO_MIX = status[8:7];
 
 // Status Bit Map:
 // 0         1         2         3         4         5         6 
 // 0123456789012345678901234567890101234567890123456789012345678901
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 `include "build_id.v" 
 localparam CONF_STR = {
@@ -213,6 +211,8 @@ localparam CONF_STR = {
 	"OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"ODE,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+   "o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+   "-;",
 	"OO,Sync core to 60 Hz,Off,On;",
 	"O5,Buffer video,Off,On;",
    "OUV,Flickerblend,Off,2 Frames,3 Frames;",
@@ -722,14 +722,7 @@ wire [7:0] b_in = b;
 video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (
 	.*,
-
-	.clk_vid(CLK_VIDEO),
-	.ce_pix_out(CE_PIXEL),
-
-	.scanlines(0),
 	.hq2x(scale==1),
-	.mono(0),
-
 	.HSync(hs),
 	.VSync(vs),
 	.HBlank(hbl),
@@ -737,6 +730,20 @@ video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 	.R(r_in),
 	.G(g_in),
 	.B(b_in)
+);
+
+wire [1:0] ar = status[14:13];
+video_freak video_freak
+(
+	.*,
+	.VGA_DE_IN(VGA_DE),
+	.VGA_DE(),
+
+	.ARX((!ar) ? (orientation > 0 && !status[15]) ? 12'd102 : 12'd160 : (ar - 1'd1)),
+	.ARY((!ar) ? (orientation > 0 && !status[15]) ? 12'd160 : 12'd102 : 12'd0      ),
+	.CROP_SIZE(0),
+	.CROP_OFF(0),
+	.SCALE(status[35:34])
 );
 
 ///////////////////////////// Fast Forward Latch /////////////////////////////////
