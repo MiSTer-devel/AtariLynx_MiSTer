@@ -234,7 +234,9 @@ begin
          fastcounter_2x    <= not fastcounter_2x;
       
          ce_fast <= '0';
-         if (fastforward = '1' or turbo = '1') then
+         if (turbo = '1') then
+            ce_fast <= '1';
+         elsif (fastforward = '1') then
             case (speedselect) is
                when "00" =>                                                        ce_fast <= '1';         -- 400%
                when "01" => if (fastcounter_1_33x = 2)                        then ce_fast <= '1'; end if; -- 133%

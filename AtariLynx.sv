@@ -221,7 +221,7 @@ localparam CONF_STR = {
    "OP,FastForward Sound,On,Off;",
 	"-;",
    "O9,CPU GPU Turbo,Off,On;",
-   "o01,Turbo-FF Speed,400%,133%,160%,200%;",
+   "o01,Fastforward Speed,400%,133%,160%,200%;",
 	"OQ,Pause when OSD is open,Off,On;",
 	"OR,Rewind Capture,Off,On;",
 	//"OC,FPS Overlay,Off,On;",
