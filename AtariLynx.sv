@@ -191,17 +191,19 @@ assign VGA_SCALER= 0;
 
 assign AUDIO_MIX = status[8:7];
 
-// Status Bit Map:
-// 0         1         2         3         4         5         6 
-// 0123456789012345678901234567890101234567890123456789012345678901
-// 0123456789ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+// Status Bit Map: (0..31 => "O", 32..63 => "o")
+// 0         1         2         3          4         5         6
+// 01234567890123456789012345678901 23456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxx
 
 `include "build_id.v" 
 localparam CONF_STR = {
-	"AtariLynx;SS3E000000:100000;",
+	"AtariLynx;SS3E000000:20000;",
 	"FS,LNX;",
 	"-;",
+	"o4,Savestates to SDCard,On,Off;",
+	"o56,Savestate Slot,1,2,3,4;",
 	"h0RS,Save state (Alt-F1);",
 	"h0RT,Restore state (F1);",
 	"-;",
@@ -227,8 +229,13 @@ localparam CONF_STR = {
 	//"OC,FPS Overlay,Off,On;",
 	"-;",
 	"R0,Reset;",
-	"J1,A,B,Option1,Option2,Pause,FastForward,SaveState,LoadState,Rewind;",
+	"J1,A,B,Option1,Option2,Pause,FastForward,Savestates,Rewind;",
 	"I,",
+	"Slot=DPAD|Save/Load=Pause+DPAD,",
+	"Active Slot 1,",
+	"Active Slot 2,",
+	"Active Slot 3,",
+	"Active Slot 4,",
 	"Save to state 1,",
 	"Restore state 1,",
 	"Save to state 2,",
@@ -236,7 +243,7 @@ localparam CONF_STR = {
 	"Save to state 3,",
 	"Restore state 3,",
 	"Save to state 4,",
-	"Restore state 4,",
+	"Restore state 4;",
 	"Rewinding...;",
 	"V,v",`BUILD_DATE
 };
@@ -272,7 +279,7 @@ wire [24:0] ioctl_addr;
 wire [15:0] ioctl_dout;
 reg         ioctl_wait = 0;
 
-wire [15:0] joystick_0, joystick_1, joystick_2, joystick_3;
+wire [15:0] joystick_0, joy0_unmod, joystick_1, joystick_2, joystick_3;
 wire [10:0] ps2_key;
 
 wire [7:0]  filetype;
@@ -306,6 +313,11 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.ioctl_wait(ioctl_wait),
 	.ioctl_index(filetype),
 	
+	.status(status),
+	.status_menumask(cart_ready),
+	.status_in({status[63:39],ss_slot,status[36:0]}),
+	.status_set(statusUpdate),
+	
 	.sd_lba(sd_lba),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
@@ -319,13 +331,11 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.img_size(img_size),
 
 	.buttons(buttons),
-	.status(status),
-	.status_menumask(cart_ready),
 	.direct_video(direct_video),
 	.gamma_bus(gamma_bus),
 	.forced_scandoubler(forced_scandoubler),
 
-	.joystick_0(joystick_0),
+	.joystick_0(joy0_unmod),
 	.joystick_1(joystick_1),
 	.joystick_2(joystick_2),
 	.joystick_3(joystick_3),
@@ -337,6 +347,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	
 	.TIMESTAMP(RTC_time)
 );
+
+assign joystick_0 = joy0_unmod[10] ? 16'b0 : joy0_unmod;
 
 ///////////////////////////////////////////////////
 
@@ -484,20 +496,21 @@ LynxTop LynxTop (
    .KeyPause         (joystick_0[8]),
    
 	// savestates
+   .increaseSSHeaderCount(!status[36]),
 	.save_state       (ss_save),
 	.load_state       (ss_load),
-	.savestate_number (ss_base),
-	.state_loaded     (ss_loaded),
+	.savestate_number (ss_slot),
 	
 	.SAVE_out_Din     (ss_din),            // data read from savestate
 	.SAVE_out_Dout    (ss_dout),           // data written to savestate
 	.SAVE_out_Adr     (ss_addr),           // all addresses are DWORD addresses!
 	.SAVE_out_rnw     (ss_rnw),            // read = 1, write = 0
 	.SAVE_out_ena     (ss_req),            // one cycle high for each action
+	.SAVE_out_be      (ss_be),            
 	.SAVE_out_done    (ss_ack),            // should be one cycle high when write is done or read value is valid
 	
 	.rewind_on        (status[27]),
-	.rewind_active    (status[27] & joystick_0[12])
+	.rewind_active    (status[27] & joystick_0[11])
 );
 
 assign AUDIO_L = (fast_forward && status[25]) ? 16'd0 : Lynx_AUDIO_L;
@@ -792,6 +805,7 @@ wire        savestate_load;
 	
 wire [63:0] ss_dout, ss_din;
 wire [27:2] ss_addr;
+wire  [7:0] ss_be;
 wire        ss_rnw, ss_req, ss_ack;
 
 assign DDRAM_CLK = clk_sys;
@@ -804,57 +818,38 @@ ddram ddram
 	.ch1_dout(ss_dout),
 	.ch1_req(ss_req),
 	.ch1_rnw(ss_rnw),
+	.ch1_be(ss_be),
 	.ch1_ready(ss_ack)
 );
 
 // saving with keyboard/OSD/gamepad
-wire       pressed = ps2_key[9];
-wire [7:0] code    = ps2_key[7:0];
+wire [1:0] ss_slot;
+wire [7:0] ss_info;
+wire ss_save, ss_load, ss_info_req;
+wire statusUpdate;
 
-reg [1:0] ss_base = 0;
-reg [7:0] ss_info;
-reg reset_1;
-reg ss_save, ss_load, ss_info_req;
-wire ss_loaded;
-always @(posedge clk_sys) begin
-	reg old_state;
-	reg alt = 0;
-	reg [1:0] old_st;
-	reg [1:0] old_st_joy;
-
-	old_state <= ps2_key[10];
-
-	if(cart_ready) begin
-		if(old_state != ps2_key[10]) begin
-			case(code)
-				'h11: alt <= pressed;
-				'h05: begin ss_save <= pressed & alt; ss_load <= pressed & ~alt; ss_base <= 0; end // F1
-				'h06: begin ss_save <= pressed & alt; ss_load <= pressed & ~alt; ss_base <= 1; end // F2
-				'h04: begin ss_save <= pressed & alt; ss_load <= pressed & ~alt; ss_base <= 2; end // F3
-				'h0C: begin ss_save <= pressed & alt; ss_load <= pressed & ~alt; ss_base <= 3; end // F4
-			endcase
-		end
-
-      old_st_joy <= joystick_0[11:10];
-		if(old_st_joy[0] ^ joystick_0[10])  ss_save <= joystick_0[10];
-		if(old_st_joy[1] ^ joystick_0[11]) ss_load <= joystick_0[11];
-      if(joystick_0[11:10]) ss_base <= 0;
-
-		old_st <= status[29:28];
-		if(old_st[0] ^ status[28]) ss_save <= status[28];
-		if(old_st[1] ^ status[29]) ss_load <= status[29];
-		if(status[29:28])    ss_base <= 0;
-
-		if(ss_load | ss_save) ss_info <= 7'd1 + {ss_base, ss_load};
-		ss_info_req <= (ss_loaded | ss_save);
-
-		// rewind info
-		if (status[27] & joystick_0[12]) begin
-			ss_info_req <= 1'b1;
-			ss_info     <= 7'd9;
-		end
-
-	end
-end
+savestate_ui savestate_ui
+(
+	.clk            (clk_sys       ),
+	.ps2_key        (ps2_key[10:0] ),
+	.allow_ss       (cart_ready    ),
+	.joySS          (joy0_unmod[10]),
+	.joyRight       (joy0_unmod[0] ),
+	.joyLeft        (joy0_unmod[1] ),
+	.joyDown        (joy0_unmod[2] ),
+	.joyUp          (joy0_unmod[3] ),
+	.joyStart       (joy0_unmod[8] ),
+	.joyRewind      (joy0_unmod[11]),
+	.rewindEnable   (status[27]    ), 
+	.status_slot    (status[38:37] ),
+	.OSD_saveload   (status[29:28] ),
+	.ss_save        (ss_save       ),
+	.ss_load        (ss_load       ),
+	.ss_info_req    (ss_info_req   ),
+	.ss_info        (ss_info       ),
+	.statusUpdate   (statusUpdate  ),
+	.selected_slot  (ss_slot       )
+);
+defparam savestate_ui.INFO_TIMEOUT_BITS = 27;
 
 endmodule

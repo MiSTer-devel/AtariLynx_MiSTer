@@ -40,13 +40,18 @@ To compensate you can either:
 Lynx has built in rotation, supported by most games, using the Joypad Keys "Option2" + "Pause"
 
 # Savestates
-Core provides 4 slots to save the state. The first slot gets saved to disk and automatically loaded (but not applied)
-upon next load of game. Rest 3 slots are residing only in memory for temporary use.
-First slot save/restore is available from OSD as well. 
+Core provides 4 slots to save and restore the state. 
+Those can be saved to SDCard or reside only in memory for temporary use(OSD Option). 
+Usage with either Keyboard, Gamepad mappable button or OSD.
 
-Hotkeys for save states:
+Keyboard Hotkeys for save states:
 - Alt-F1..F4 - save the state
 - F1...F4 - restore
+
+Gamepad:
+- Savestatebutton+Left or Right switches the savestate slot
+- Savestatebutton+Pause+Down saves to the selected slot
+- Savestatebutton+Pause+Up loads from the selected slot
 
 # Rewind
 To use rewind, turn on the OSD Option "Rewind Capture" and map the rewind button.

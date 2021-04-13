@@ -30,4 +30,5 @@ set_global_assignment -name VHDL_FILE rtl/fpsoverlay.vhd
 set_global_assignment -name VHDL_FILE rtl/header.vhd
 set_global_assignment -name VHDL_FILE rtl/lynxTop.vhd
 set_global_assignment -name SDC_FILE AtariLynx.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate_ui.sv
 set_global_assignment -name SYSTEMVERILOG_FILE AtariLynx.sv

@@ -5,8 +5,8 @@ use IEEE.numeric_std.all;
 entity statemanager is
    generic
    (
-      Softmap_SaveState_ADDR   : integer; -- count:  262144    -- 256 Kbyte Data for Savestate
-      Softmap_Rewind_ADDR      : integer  -- count:  262144*128 -- 128*256 Kbyte Data for Savestates
+      Softmap_SaveState_ADDR   : integer; -- count:  131072    -- 128 Kbyte Data for Savestate
+      Softmap_Rewind_ADDR      : integer  -- count:  131072*256 -- 256*128 Kbyte Data for Savestates
    );
    port 
    (

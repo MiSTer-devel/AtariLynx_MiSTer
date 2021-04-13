@@ -60,6 +60,7 @@ entity LynxTop is
       KeyPause                   : in  std_logic;
    
       -- savestates
+      increaseSSHeaderCount      : in  std_logic;
       save_state                 : in  std_logic;
       load_state                 : in  std_logic;
       savestate_number           : integer range 0 to 3;
@@ -70,6 +71,7 @@ entity LynxTop is
       SAVE_out_Adr               : out std_logic_vector(25 downto 0);             
       SAVE_out_rnw               : out std_logic;          
       SAVE_out_ena               : out std_logic;          
+      SAVE_out_be                : out std_logic_vector(7 downto 0);
       SAVE_out_done              : in  std_logic;          
       
       rewind_on                  : in  std_logic;
@@ -718,6 +720,7 @@ begin
             
       load_done               => state_loaded,
             
+      increaseSSHeaderCount   => increaseSSHeaderCount,
       save                    => savestate_savestate,
       load                    => savestate_loadstate,
       savestate_address       => savestate_address,  
@@ -747,6 +750,7 @@ begin
       bus_out_Adr             => SAVE_out_Adr,
       bus_out_rnw             => SAVE_out_rnw,
       bus_out_ena             => SAVE_out_ena,
+      bus_out_be              => SAVE_out_be,
       bus_out_done            => SAVE_out_done
    );   
    
