@@ -50,6 +50,7 @@ vcom -O5 -2008 -quiet -work sim/lynx ^
 ../rtl/overlay.vhd ^
 ../rtl/fpsoverlay.vhd ^
 ../rtl/header.vhd ^
+../rtl/lynx_cheats.vhd ^
 ../rtl/LynxTop.vhd
 
 vlog -sv -quiet -work sim/tb ^

@@ -66,6 +66,7 @@ architecture arch of etb is
    signal ch1_addr         : std_logic_vector(27 downto 1);
    signal ch1_dout         : std_logic_vector(63 downto 0);
    signal ch1_din          : std_logic_vector(63 downto 0);
+   signal ch1_be           : std_logic_vector(7 downto 0);
    signal ch1_req          : std_logic;
    signal ch1_rnw          : std_logic;
    signal ch1_ready        : std_logic;
@@ -73,6 +74,7 @@ architecture arch of etb is
    signal SAVE_out_Din     : std_logic_vector(63 downto 0);
    signal SAVE_out_Dout    : std_logic_vector(63 downto 0);
    signal SAVE_out_Adr     : std_logic_vector(25 downto 0);
+   signal SAVE_out_be      : std_logic_vector(7 downto 0);
    signal SAVE_out_rnw     : std_logic;                    
    signal SAVE_out_ena     : std_logic;                                    
    signal SAVE_out_done    : std_logic; 
@@ -83,6 +85,8 @@ architecture arch of etb is
    signal Lynx_LoadState     : std_logic_vector(Reg_Lynx_LoadState.upper      downto Reg_Lynx_LoadState.lower)      := (others => '0'); 
    signal Lynx_Rewind_on     : std_logic_vector(Reg_Lynx_Rewind_on    .upper  downto Reg_Lynx_Rewind_on    .lower)  := (others => '0'); 
    signal Lynx_Rewind_active : std_logic_vector(Reg_Lynx_Rewind_active.upper  downto Reg_Lynx_Rewind_active.lower)  := (others => '0'); 
+   
+   signal cheat_on           : std_logic := '0';
    
    
 begin
@@ -151,6 +155,7 @@ begin
       KeyPause                   => '0',
                                  
       -- savestates              
+      increaseSSHeaderCount      => '0',
       save_state                 => Lynx_SaveState(0),
       load_state                 => Lynx_LoadState(0),
       savestate_number           => 0,
@@ -161,11 +166,21 @@ begin
       SAVE_out_Adr               => SAVE_out_Adr, 
       SAVE_out_rnw               => SAVE_out_rnw, 
       SAVE_out_ena               => SAVE_out_ena, 
+      SAVE_out_be                => SAVE_out_be, 
       SAVE_out_done              => SAVE_out_done,
                        
       rewind_on                  => Lynx_Rewind_on(0),
-      rewind_active              => Lynx_Rewind_active(0)
+      rewind_active              => Lynx_Rewind_active(0),
+      
+      cheat_clear                => '0',
+      cheats_enabled             => '1',
+      cheat_on                   => cheat_on,
+      cheat_in                   => x"00000000" & x"0000000B" & x"00000000" & x"00000059",
+      cheats_active              => open
+      
    );
+   
+   --cheat_on <= '1' after 30 us;
    
    isdram_model : entity tb.sdram_model 
    port map
@@ -185,6 +200,7 @@ begin
    ch1_addr <= SAVE_out_Adr(25 downto 0) & "0";
    ch1_din  <= SAVE_out_Din;
    ch1_req  <= SAVE_out_ena;
+   ch1_be   <= SAVE_out_be;
    ch1_rnw  <= SAVE_out_rnw;
    SAVE_out_Dout <= ch1_dout;
    SAVE_out_done <= ch1_ready;
@@ -206,6 +222,7 @@ begin
       ch1_dout         => ch1_dout,        
       ch1_din          => ch1_din,         
       ch1_req          => ch1_req,         
+      ch1_be           => ch1_be,         
       ch1_rnw          => ch1_rnw,         
       ch1_ready        => ch1_ready
    );

@@ -195,12 +195,15 @@ assign AUDIO_MIX = status[8:7];
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxx
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxx
 
 `include "build_id.v" 
 localparam CONF_STR = {
 	"AtariLynx;SS3E000000:20000;",
 	"FS,LNX;",
+    "-;",
+	"C,Cheats;",
+	"H1o7,Cheats Enabled,Yes,No;",
 	"-;",
 	"o4,Savestates to SDCard,On,Off;",
 	"o56,Savestate Slot,1,2,3,4;",
@@ -314,7 +317,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.ioctl_index(filetype),
 	
 	.status(status),
-	.status_menumask(cart_ready),
+	.status_menumask({~gg_active, cart_ready}),
 	.status_in({status[63:39],ss_slot,status[36:0]}),
 	.status_set(statusUpdate),
 	
@@ -359,6 +362,7 @@ reg cart_ready = 0;
 
 wire cart_download = ioctl_download && (filetype == 8'h01 || filetype == 8'h41 || filetype == 8'h80);
 wire bios_download = ioctl_download && (filetype == 8'h00);
+wire code_download = ioctl_download & &filetype;
 
 wire sdram_ack;
 
@@ -510,7 +514,13 @@ LynxTop LynxTop (
 	.SAVE_out_done    (ss_ack),            // should be one cycle high when write is done or read value is valid
 	
 	.rewind_on        (status[27]),
-	.rewind_active    (status[27] & joystick_0[11])
+	.rewind_active    (status[27] & joystick_0[11]),
+   
+   .cheat_clear(gg_reset),
+   .cheats_enabled(~status[39]),
+   .cheat_on(gg_valid),
+   .cheat_in(gg_code),
+   .cheats_active(gg_active)
 );
 
 assign AUDIO_L = (fast_forward && status[25]) ? 16'd0 : Lynx_AUDIO_L;
@@ -612,6 +622,8 @@ reg [8:0] x,y;
 reg [3:0] div;
 reg signed [3:0] HShift;
 reg signed [3:0] VShift; 
+reg hbl_1;
+reg evenline;
 
 always @(posedge CLK_VIDEO) begin
 
@@ -644,26 +656,28 @@ always @(posedge CLK_VIDEO) begin
          if(y == 62)      vbl <= 0;
          if(y >= 62+160)  vbl <= 1;
       end else if (videomode == 3) begin
-         if(x == 320)            hbl <= 1;
-         if(y == 40+VShift)      vbl <= 0;
-         if(y >= 40+204+VShift)  vbl <= 1;
+         if(x == 320)                     hbl <= 1;
+         if(y == 40+$signed(VShift))      vbl <= 0;
+         if(y >= 40+204+$signed(VShift))  vbl <= 1;
       end
       
 		if(x == 000) begin 
          hbl <= 0;
       end  
        
-		if(x == 350 + HShift) begin
+		if(x == 350 + $signed(HShift)) begin
 			hs <= 1;
 			if(y == 1)   vs <= 1;
 			if(y == 4)   vs <= 0;
 		end
 
-		if(x == 350+32+HShift) hs  <= 0;
+		if(x == 350+32+$signed(HShift)) hs  <= 0;
 
 	end
 
 	if(ce_pix) begin
+   
+      hbl_1 <= hbl;
 
       if (videomode == 0) begin
          if(vbl) px_addr <= 0;
@@ -684,13 +698,15 @@ always @(posedge CLK_VIDEO) begin
          end
       end else if (videomode == 3) begin
          if(vbl) begin
-            px_addr <= 0;
+            px_addr  <= 0;
+            evenline <= 1'b0;
          end else if(!hbl) begin 
             if (x[0] == 1'b1) begin
                px_addr <= px_addr + 1'd1;
             end
-         end else begin
-            px_addr <= 8'd160 * ((y - 6'd39 + VShift) / 2'd2);
+         end else if (hbl && ~hbl_1) begin
+            evenline <= ~evenline;
+            if (~evenline) px_addr <= px_addr - 8'd160;
          end
       end
 
@@ -851,5 +867,43 @@ savestate_ui savestate_ui
 	.selected_slot  (ss_slot       )
 );
 defparam savestate_ui.INFO_TIMEOUT_BITS = 27;
+
+////////////////////////////  CODES  ///////////////////////////////////
+
+// Code layout:
+// {code flags,     32'b address, 32'b compare, 32'b replace}
+//  127:96          95:64         63:32         31:0
+// Integer values are in BIG endian byte order, so it up to the loader
+// or generator of the code to re-arrange them correctly.
+reg [127:0] gg_code;
+reg gg_valid;
+reg gg_reset;
+reg ioctl_download_1;
+wire gg_active;
+always_ff @(posedge clk_sys) begin
+
+   gg_reset <= 0;
+   ioctl_download_1 <= ioctl_download;
+	if (ioctl_download && ~ioctl_download_1 && filetype == 255) begin
+      gg_reset <= 1;
+   end
+
+   gg_valid <= 0;
+	if (code_download & ioctl_wr) begin
+		case (ioctl_addr[3:0])
+			0:  gg_code[111:96]  <= ioctl_dout; // Flags Bottom Word
+			2:  gg_code[127:112] <= ioctl_dout; // Flags Top Word
+			4:  gg_code[79:64]   <= ioctl_dout; // Address Bottom Word
+			6:  gg_code[95:80]   <= ioctl_dout; // Address Top Word
+			8:  gg_code[47:32]   <= ioctl_dout; // Compare Bottom Word
+			10: gg_code[63:48]   <= ioctl_dout; // Compare top Word
+			12: gg_code[15:0]    <= ioctl_dout; // Replace Bottom Word
+			14: begin
+				gg_code[31:16]    <= ioctl_dout; // Replace Top Word
+				gg_valid          <= 1;          // Clock it in
+			end
+		endcase
+	end
+end
 
 endmodule

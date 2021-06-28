@@ -75,7 +75,14 @@ entity LynxTop is
       SAVE_out_done              : in  std_logic;          
       
       rewind_on                  : in  std_logic;
-      rewind_active              : in  std_logic
+      rewind_active              : in  std_logic;
+      
+      -- cheats
+      cheat_clear                : in  std_logic;
+      cheats_enabled             : in  std_logic;
+      cheat_on                   : in  std_logic;
+      cheat_in                   : in  std_logic_vector(127 downto 0);
+      cheats_active              : out std_logic := '0'
    );
 end entity;
 
@@ -128,6 +135,11 @@ architecture arch of LynxTop is
    signal pixel_x                : integer range 0 to 159;                    
    signal pixel_y                : integer range 0 to 101;                    
    signal HzcountBCD             : unsigned(7 downto 0);
+   
+   -- cheats
+   signal RAMaccess              : std_logic;
+   signal cheatOverwrite         : std_logic;
+   signal cheatData               : std_logic_vector(7 downto 0);
    
    -- memorymux
    signal bus_request            : std_logic := '0';
@@ -406,6 +418,25 @@ begin
       SSBUS_Dout        => ss_wired_or(2) 
    );
    
+   -- cheats
+   ilynx_cheats : entity work.lynx_cheats
+   port map
+   (
+      clk            => clk,
+      reset          => reset_in,
+                     
+      cheat_clear    => cheat_clear,   
+      cheats_enabled => cheats_enabled,
+      cheat_on       => cheat_on,      
+      cheat_in       => cheat_in,      
+      cheats_active  => cheats_active, 
+                     
+      BusAddr        => cpu_bus_addr,
+      RAMaccess      => RAMaccess,
+      cheatOverwrite => cheatOverwrite,
+      cheatData      => cheatData
+   );
+   
    -- Memory Mux
    bus_request   <= cpu_bus_request;
    bus_rnw       <= cpu_bus_rnw;     
@@ -428,6 +459,10 @@ begin
       bus_datawrite        => bus_datawrite,
       bus_dataread         => bus_dataread, 
       bus_done             => bus_done,
+      
+      RAMaccess            => RAMaccess,
+      cheatOverwrite       => cheatOverwrite,
+      cheatData            => cheatData,
       
       RegBus_Din           => RegBus_Din,
       RegBus_Adr           => RegBus_Adr,

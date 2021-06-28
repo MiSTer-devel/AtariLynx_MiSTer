@@ -96,8 +96,8 @@ begin
       variable line_out : line;
       variable recordcount : integer := 0;
       
-      constant filenamebase               : string := "debug_sim";
-      variable filename_current           : string(1 to 21);
+      constant filenamebase               : string := "R:\\debug_sim";
+      variable filename_current           : string(1 to 25);
       
    begin
    
