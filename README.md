@@ -4,8 +4,12 @@
 # HW Requirements
 SDRam module of any size is required
 
+# Installing
+
+Copy the .rbf to the **/media/fat/\_Console** folder of the MiSTer SD card. Put any games (\*.LNX) into the **/media/fat/AtariLynx** folder.
+
 # Bootrom
-You need to add the Bootrom file(often called lynxboot.img) to the AtariLynx Folder and name it: boot.rom
+You need to add the Bootrom file (often called lynxboot.img) to the AtariLynx Folder and name it: boot.rom
 
 Checksum for valid Bootrom:
 
