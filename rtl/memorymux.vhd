@@ -87,6 +87,7 @@ architecture arch of memorymux is
             
    signal ROM_address            : std_logic_vector(8 downto 0);
    signal ROM_data               : std_logic_vector(7 downto 0);
+   signal ROM_lastBank           : std_logic := '0';
             
    -- 64kbyte ram    
    signal RAM_address            : std_logic_vector(15 downto 0);
@@ -94,6 +95,7 @@ architecture arch of memorymux is
    signal RAM_WE                 : std_logic;
    signal RAM_WE_muxed           : std_logic;
    signal RAM_dataRead           : std_logic_vector(7 downto 0);
+   signal RAM_lastBank           : unsigned(7 downto 0) := (others => '0');
    
    signal RAMB_address           : std_logic_vector(15 downto 0);
    signal RAMB_data              : std_logic_vector(7 downto 0);
@@ -265,15 +267,23 @@ begin
                            
                      elsif ((bus_addr >= 16#FFFA# and mappedVector = '1') or (bus_addr >= 16#FE00# and bus_addr < 16#FFF9# and mappedROM = '1')) then
                         if (bus_rnw = '1') then
-                           state <= READ_ROM;
+                           if (ROM_lastBank = ROM_address(8)) then
+                              wait_cnt <= 0;
+                           end if;
+                           ROM_lastBank <= ROM_address(8);
+                           state        <= READ_ROM;
                         else
                            state <= WRITE_WAIT;
                         end if;
                            
                      else --if (bus_addr < 16#FC00#)
                         if (bus_rnw = '1') then
-                           state     <= READ_RAM;
-                           RAMaccess <= '1';
+                           if (RAM_lastBank = bus_addr(15 downto 8)) then
+                              wait_cnt <= 0;
+                           end if;
+                           RAM_lastBank <= bus_addr(15 downto 8); -- possible it must invalidate when access from DMA/GPU happened?
+                           state        <= READ_RAM;
+                           RAMaccess    <= '1';
                         else
                            state  <= WRITE_WAIT;
                            RAM_WE <= '1';

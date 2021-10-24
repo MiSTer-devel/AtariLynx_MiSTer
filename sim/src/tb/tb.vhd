@@ -138,7 +138,7 @@ begin
       audio_r 	                  => open,
       
       -- settings
-      fastforward                => '1',
+      fastforward                => '0',
       turbo                      => '0',
       speedselect                => "00",
       fpsoverlay_on              => '0',
