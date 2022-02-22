@@ -30,7 +30,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [45:0] HPS_BUS,
+	inout  [48:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        CLK_VIDEO,
@@ -55,8 +55,9 @@ module emu
 	
 	input  [11:0] HDMI_WIDTH,
 	input  [11:0] HDMI_HEIGHT,
+	output        HDMI_FREEZE,
 
-`ifdef USE_FB
+`ifdef MISTER_FB
 	// Use framebuffer in DDRAM (USE_FB=1 in qsf)
 	// FB_FORMAT:
 	//    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
@@ -112,7 +113,6 @@ module emu
 	output        SD_CS,
 	input         SD_CD,
 
-`ifdef USE_DDRAM
 	//High latency DDR3 RAM interface
 	//Use for non-critical time purposes
 	output        DDRAM_CLK,
@@ -125,9 +125,7 @@ module emu
 	output [63:0] DDRAM_DIN,
 	output  [7:0] DDRAM_BE,
 	output        DDRAM_WE,
-`endif
 
-`ifdef USE_SDRAM
 	//SDRAM interface with lower latency
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
@@ -140,9 +138,8 @@ module emu
 	output        SDRAM_nCAS,
 	output        SDRAM_nRAS,
 	output        SDRAM_nWE,
-`endif
 
-`ifdef DUAL_SDRAM
+`ifdef MISTER_DUAL_SDRAM
 	//Secondary SDRAM
 	input         SDRAM2_EN,
 	output        SDRAM2_CLK,
@@ -188,6 +185,7 @@ assign LED_DISK  = 0;
 assign LED_POWER = 0;
 assign BUTTONS   = 0;
 assign VGA_SCALER= 0;
+assign HDMI_FREEZE=0;
 
 assign AUDIO_MIX = status[8:7];
 
@@ -210,26 +208,30 @@ localparam CONF_STR = {
 	"h0RS,Save state (Alt-F1);",
 	"h0RT,Restore state (F1);",
 	"-;",
-	"OAB,Orientation,Horz,Vert,Vert180;",
-	"OF,240p Mode,Off,On;",
-   "OGJ,CRT H-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
-	"OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
-	"ODE,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-   "o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
-   "-;",
-	"OO,Sync core to 60 Hz,Off,On;",
-	"O5,Buffer video,Off,On;",
-   "OUV,Flickerblend,Off,2 Frames,3 Frames;",
-   "-;",
-	"O78,Stereo mix,none,25%,50%,100%;",
-   "OP,FastForward Sound,On,Off;",
-	"-;",
-   "O9,CPU GPU Turbo,Off,On;",
-   "o01,Fastforward Speed,400%,133%,160%,200%;",
 	"OQ,Pause when OSD is open,Off,On;",
+	"O9,CPU GPU Turbo,Off,On;",
+	"o01,Fastforward Speed,400%,133%,160%,200%;",
 	"OR,Rewind Capture,Off,On;",
-	//"OC,FPS Overlay,Off,On;",
+	"-;",
+	"P1,Audio & Video;",
+	"P1-;",
+	"P1OAB,Orientation,Horz,Vert,Vert180;",
+	"P1OF,240p Mode,Off,On;",
+	"P1-;",
+	"P1ODE,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"P1O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P1-;",
+	"P1o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+	"P1OGJ,CRT H-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"P1OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"P1-;",
+	"P1OO,Sync core to 60 Hz,Off,On;",
+	"P1O5,Buffer video,Off,On;",
+	"P1OUV,Flickerblend,Off,2 Frames,3 Frames;",
+	"P1OC,FPS Overlay,Off,On;",
+	"P1-;",
+	"P1O78,Stereo mix,none,25%,50%,100%;",
+	"P1OP,FastForward Sound,On,Off;",
 	"-;",
 	"R0,Reset;",
 	"J1,A,B,Option1,Option2,Pause,FastForward,Savestates,Rewind;",
@@ -246,7 +248,7 @@ localparam CONF_STR = {
 	"Save to state 3,",
 	"Restore state 3,",
 	"Save to state 4,",
-	"Restore state 4;",
+	"Restore state 4,",
 	"Rewinding...;",
 	"V,v",`BUILD_DATE
 };
@@ -301,13 +303,11 @@ wire [63:0] img_size;
 
 wire [32:0] RTC_time;
 
-hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
+hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 (
 	.clk_sys(clk_sys),
 	.HPS_BUS(HPS_BUS),
 	.EXT_BUS(),
-
-	.conf_str(CONF_STR),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_wr(ioctl_wr),
@@ -321,13 +321,13 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(1)) hps_io
 	.status_in({status[63:39],ss_slot,status[36:0]}),
 	.status_set(statusUpdate),
 	
-	.sd_lba(sd_lba),
+	.sd_lba('{sd_lba}),
 	.sd_rd(sd_rd),
 	.sd_wr(sd_wr),
 	.sd_ack(sd_ack),
 	.sd_buff_addr(sd_buff_addr),
 	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din(sd_buff_din),
+	.sd_buff_din('{sd_buff_din}),
 	.sd_buff_wr(sd_buff_wr),
 	.img_mounted(img_mounted),
 	.img_readonly(img_readonly),
@@ -752,6 +752,7 @@ video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
 (
 	.*,
 	.hq2x(scale==1),
+	.freeze_sync(),
 	.HSync(hs),
 	.VSync(vs),
 	.HBlank(hbl),
