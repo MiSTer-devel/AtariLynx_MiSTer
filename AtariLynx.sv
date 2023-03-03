@@ -232,6 +232,7 @@ localparam CONF_STR = {
 	"P1OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1-;",
 	"P1OO,Sync core to 60 Hz,Off,On;",
+	"P1oD,H Freq (Composite),16.0kHz,15.74kHz;",
 	"P1O5,Buffer video,Off,On;",
 	"P1OUV,Flickerblend,Off,2 Frames,3 Frames;",
 	"P1OC,FPS Overlay,Off,On;",
@@ -343,6 +344,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.direct_video(direct_video),
 	.gamma_bus(gamma_bus),
 	.forced_scandoubler(forced_scandoubler),
+    .new_vmode(new_vmode),
 
 	.joystick_0(joy0_unmod),
 	.joystick_1(joystick_1),
@@ -550,7 +552,6 @@ reg [1:0] buffercnt_read     = 0;
 reg [1:0] buffercnt_last     = 0;
 reg       syncpaused         = 0;
 
-
 always @(posedge clk_sys) begin
    if (buffervideo) begin
       if(pixel_we && pixel_addr == 16319) begin
@@ -628,8 +629,22 @@ reg [8:0] x,y;
 reg [3:0] div;
 reg signed [3:0] HShift;
 reg signed [3:0] VShift; 
+reg [9:0] HDisplayHFreqMode; 
+reg [8:0] VDisplayHFreqMode;
+reg signed [3:0] HShiftHFreqMode;
+reg signed [3:0] VShiftHFreqMode;  
 reg hbl_1;
 reg evenline;
+
+// If video timing changes, force mode update
+reg [1:0] video_status;
+reg new_vmode = 0;
+always @(posedge clk_sys) begin
+    if (video_status != status[45]) begin
+        video_status <= status[45];
+        new_vmode <= ~new_vmode;
+    end
+end
 
 always @(posedge CLK_VIDEO) begin
 
@@ -717,17 +732,21 @@ always @(posedge CLK_VIDEO) begin
       end
 
 		x <= x + 1'd1;
-		if(x == 444) begin
+		if(x == HDisplayHFreqMode) begin
 			x <= 0;
 			if (~&y) y <= y + 1'd1;
-			if (y >= 269) begin
+			if (y >= VDisplayHFreqMode) begin
             y              <= 0;
             buffercnt_read <= buffercnt_readnext;
             buffercnt_last <= buffercnt_read;
             
             orientation <= status[11:10];
-            HShift      <= status[19:16];
-            VShift      <= status[23:20];
+            HShift      <= status[19:16] + HShiftHFreqMode;
+            VShift      <= status[23:20] - VShiftHFreqMode;
+			HShiftHFreqMode <= (status[45] ? 4'd7 : 4'd0);
+			VShiftHFreqMode <= (status[45] ? 4'd5 : 4'd0);
+			HDisplayHFreqMode <= (status[45] ? 10'd451 : 10'd444);
+			VDisplayHFreqMode <= (status[45] ? 9'd264 : 9'd269);
             if (status[15]) begin
                videomode = 3; // 320*204, 60Hz
             end else begin
