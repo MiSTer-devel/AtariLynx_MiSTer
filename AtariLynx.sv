@@ -204,7 +204,7 @@ assign AUDIO_MIX = status[8:7];
 `include "build_id.v" 
 localparam CONF_STR = {
 	"AtariLynx;SS3E000000:20000;",
-	"FS,LNX;",
+	"FS,LNXLYX;",
     "-;",
 	"C,Cheats;",
 	"H1o7,Cheats Enabled,Yes,No;",
