@@ -20,10 +20,6 @@ entity memorymux is
       bus_dataread         : out std_logic_vector(7 downto 0) := (others => '0');
       bus_done             : out std_logic := '0';
                            
-      RAMaccess            : out std_logic := '0';
-      cheatOverwrite       : in  std_logic;
-      cheatData            : in  std_logic_vector(7 downto 0);
-                           
       RegBus_Din           : out std_logic_vector(BUS_buswidth-1 downto 0) := (others => '0');
       RegBus_Adr           : out std_logic_vector(BUS_busadr-1 downto 0) := (others => '0');
       RegBus_wren          : out std_logic := '0';
@@ -283,7 +279,6 @@ begin
                            end if;
                            RAM_lastBank <= bus_addr(15 downto 8); -- possible it must invalidate when access from DMA/GPU happened?
                            state        <= READ_RAM;
-                           RAMaccess    <= '1';
                         else
                            state  <= WRITE_WAIT;
                            RAM_WE <= '1';
@@ -314,15 +309,10 @@ begin
                   end if;
                
                when READ_RAM =>
-                  if (cheatOverwrite = '1') then
-                     bus_dataread <= cheatData;
-                  else
-                     bus_dataread <= RAM_dataRead;
-                  end if;
+                  bus_dataread <= RAM_dataRead;
                   if (wait_cnt = 0) then
                      state     <= IDLE;
                      bus_done  <= '1';
-                     RAMaccess <= '0';
                   end if;
                   
                when READ_CART =>

@@ -54,7 +54,21 @@ module sdram
 	input      [15:0] ch3_din,
 	input             ch3_req,
 	input             ch3_rnw,
-	output reg        ch3_ready
+	output reg        ch3_ready,
+
+	input      [26:1] ch4_addr,
+	output reg [15:0] ch4_dout,
+	input      [15:0] ch4_din,
+	input             ch4_req,
+	input             ch4_rnw,
+	output reg        ch4_ready,
+
+	input      [26:1] ch5_addr,
+	output reg [15:0] ch5_dout,
+	input      [15:0] ch5_din,
+	input             ch5_req,
+	input             ch5_rnw,
+	output reg        ch5_ready
 );
 
 assign SDRAM_nCS  = chip;
@@ -105,7 +119,7 @@ localparam STATE_RFSH    = 10;
 
 
 always @(posedge clk) begin
-	reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3;
+	reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3, data_ready_delay4, data_ready_delay5;
 
 	reg        saved_wr;
 	reg [12:0] cas_addr;
@@ -113,26 +127,32 @@ always @(posedge clk) begin
 	reg [15:0] dq_reg;
 	reg  [3:0] state = STATE_STARTUP;
 
-	reg       ch1_rq, ch2_rq, ch3_rq;
-	reg [1:0] ch;
+	reg       ch1_rq, ch2_rq, ch3_rq, ch4_rq, ch5_rq;
+	reg [2:0] ch;
 
 	ch1_rq <= ch1_rq | ch1_req;
 	ch2_rq <= ch2_rq | ch2_req;
 	ch3_rq <= ch3_rq | ch3_req;
+	ch4_rq <= ch4_rq | ch4_req;
+	ch5_rq <= ch5_rq | ch5_req;
 
 	ch1_ready <= 0;
 	ch2_ready <= 0;
 	ch3_ready <= 0;
+	ch4_ready <= 0;
+	ch5_ready <= 0;
 
 	refresh_count <= refresh_count+1'b1;
 
 	data_ready_delay1 <= data_ready_delay1>>1;
 	data_ready_delay2 <= data_ready_delay2>>1;
 	data_ready_delay3 <= data_ready_delay3>>1;
+	data_ready_delay4 <= data_ready_delay4>>1;
+	data_ready_delay5 <= data_ready_delay5>>1;
 
 	dq_reg <= SDRAM_DQ;
 
-	if(data_ready_delay1[3]) ch1_dout[15:00] <= dq_reg;
+	if(data_ready_delay1[1]) ch1_dout[15:00] <= dq_reg;
 	if(data_ready_delay1[1]) ch1_ready <= 1;
 
 	if(data_ready_delay2[3]) ch2_dout[15:00] <= dq_reg;
@@ -141,6 +161,12 @@ always @(posedge clk) begin
 
 	if(data_ready_delay3[1]) ch3_dout[15:00] <= dq_reg;
 	if(data_ready_delay3[1]) ch3_ready <= 1;
+
+	if(data_ready_delay4[1]) ch4_dout[15:00] <= dq_reg;
+	if(data_ready_delay4[1]) ch4_ready <= 1;
+
+	if(data_ready_delay5[1]) ch5_dout[15:00] <= dq_reg;
+	if(data_ready_delay5[1]) ch5_ready <= 1;
 
 	SDRAM_DQ <= 16'bZ;
 
@@ -239,6 +265,26 @@ always @(posedge clk) begin
 				command    <= CMD_ACTIVE;
 				state      <= STATE_WAIT;
 			end
+			else if(ch4_rq) begin
+				{cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch4_addr[25:1]};
+				chip       <= ch4_addr[26];
+				saved_data <= ch4_din;
+				saved_wr   <= ~ch4_rnw;
+				ch         <= 3;
+				ch4_rq     <= 0;
+				command    <= CMD_ACTIVE;
+				state      <= STATE_WAIT;
+			end
+			else if(ch5_rq) begin
+				{cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch5_addr[25:1]};
+				chip       <= ch5_addr[26];
+				saved_data <= ch5_din;
+				saved_wr   <= ~ch5_rnw;
+				ch         <= 4;
+				ch5_rq     <= 0;
+				command    <= CMD_ACTIVE;
+				state      <= STATE_WAIT;
+			end
 		end
 
 		STATE_WAIT: state <= STATE_RW1;
@@ -247,12 +293,18 @@ always @(posedge clk) begin
 			if(saved_wr) begin
 				command  <= CMD_WRITE;
 				SDRAM_DQ <= saved_data[15:0];
-				if(!ch) begin
+				if(ch == 0) begin
 					ch1_ready  <= 1;
 					state <= STATE_IDLE_2;
 				end
-				else begin
+				else if(ch == 1) begin
 					state <= STATE_RW2;
+				end
+				else begin
+					if(ch == 2) ch3_ready <= 1;
+					if(ch == 3) ch4_ready <= 1;
+					if(ch == 4) ch5_ready <= 1;
+					state <= STATE_IDLE_2;
 				end
 			end
 			else begin
@@ -260,7 +312,9 @@ always @(posedge clk) begin
 				state   <= STATE_IDLE_5;
 				     if(ch == 0) data_ready_delay1[CAS_LATENCY+BURST_LENGTH+1] <= 1;
 				else if(ch == 1) data_ready_delay2[CAS_LATENCY+BURST_LENGTH+1] <= 1;
-				else             data_ready_delay3[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+				else if(ch == 2) data_ready_delay3[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+				else if(ch == 3) data_ready_delay4[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+				else             data_ready_delay5[CAS_LATENCY+BURST_LENGTH+1] <= 1;
 			end
 		end
 
@@ -279,7 +333,9 @@ always @(posedge clk) begin
 				SDRAM_A[1]  <= 1;
 				command     <= CMD_WRITE;
 				SDRAM_DQ    <= saved_data[31:16];
-				ch3_ready   <= 1;
+				if(ch == 2) ch3_ready <= 1;
+				if(ch == 3) ch4_ready <= 1;
+				if(ch == 4) ch5_ready <= 1;
 			end
 		end
 	endcase

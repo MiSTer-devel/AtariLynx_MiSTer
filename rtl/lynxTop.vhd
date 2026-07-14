@@ -43,9 +43,7 @@ entity LynxTop is
       audio_r                    : out std_logic_vector(15 downto 0); -- 16 bit signed
 
       --settings
-      fastforward                : in  std_logic;
       turbo                      : in  std_logic;
-      speedselect                : in  std_logic_vector(1 downto 0); -- 0 = 400%, 1 = 133%, 2 = 160%, 3 = 200%
       fpsoverlay_on              : in  std_logic;
    
       -- JOYSTICK
@@ -61,32 +59,7 @@ entity LynxTop is
 
       -- ComLynx serial
       comm_rx                    : in  std_logic;
-      comm_tx                    : out std_logic;
-   
-      -- savestates
-      increaseSSHeaderCount      : in  std_logic;
-      save_state                 : in  std_logic;
-      load_state                 : in  std_logic;
-      savestate_number           : integer range 0 to 3;
-      state_loaded               : out std_logic;
-      
-      SAVE_out_Din               : out std_logic_vector(63 downto 0);                                                   
-      SAVE_out_Dout              : in  std_logic_vector(63 downto 0);                                           
-      SAVE_out_Adr               : out std_logic_vector(25 downto 0);             
-      SAVE_out_rnw               : out std_logic;          
-      SAVE_out_ena               : out std_logic;          
-      SAVE_out_be                : out std_logic_vector(7 downto 0);
-      SAVE_out_done              : in  std_logic;          
-      
-      rewind_on                  : in  std_logic;
-      rewind_active              : in  std_logic;
-      
-      -- cheats
-      cheat_clear                : in  std_logic;
-      cheats_enabled             : in  std_logic;
-      cheat_on                   : in  std_logic;
-      cheat_in                   : in  std_logic_vector(127 downto 0);
-      cheats_active              : out std_logic := '0'
+      comm_tx                    : out std_logic
    );
 end entity;
 
@@ -98,10 +71,6 @@ architecture arch of LynxTop is
    -- clock
    signal ce_counter             : unsigned (1 downto 0) := (others => '0');
    signal ce                     : std_logic := '0';
-   signal ce_fast                : std_logic := '0';
-   signal fastcounter_1_33x      : integer range 0 to 2 := 0;
-   signal fastcounter_1_6x       : integer range 0 to 4 := 0;
-   signal fastcounter_2x         : std_logic := '0';
    
    -- register
    signal RegBus_Din             : std_logic_vector(BUS_buswidth-1 downto 0);
@@ -139,11 +108,6 @@ architecture arch of LynxTop is
    signal pixel_x                : integer range 0 to 159;                    
    signal pixel_y                : integer range 0 to 101;                    
    signal HzcountBCD             : unsigned(7 downto 0);
-   
-   -- cheats
-   signal RAMaccess              : std_logic;
-   signal cheatOverwrite         : std_logic;
-   signal cheatData               : std_logic_vector(7 downto 0);
    
    -- memorymux
    signal bus_request            : std_logic := '0';
@@ -193,32 +157,13 @@ architecture arch of LynxTop is
    signal bs93_data              : std_logic_vector(7 downto 0);     
    signal bs93_wren              : std_logic;
 
-   -- savestates
+   -- state capture bus
    signal reset                  : std_logic;
-   signal sleep_savestate        : std_logic;
-   signal sleep_rewind           : std_logic;
-   signal system_idle            : std_logic;
-   signal savestate_slow         : std_logic;
-   
-   type t_ss_wired_or is array(0 to 8) of std_logic_vector(63 downto 0);
-   signal ss_wired_or : t_ss_wired_or;
-   
-   signal savestate_savestate    : std_logic; 
-   signal savestate_loadstate    : std_logic; 
-   signal savestate_address      : integer; 
-   signal savestate_busy         : std_logic; 
    
    signal SSBUS_Din              : std_logic_vector(SSBUS_buswidth-1 downto 0);
    signal SSBUS_Adr              : std_logic_vector(SSBUS_busadr-1 downto 0);
    signal SSBUS_wren             : std_logic := '0';
    signal SSBUS_rst              : std_logic := '0';
-   signal SSBUS_Dout             : std_logic_vector(SSBUS_buswidth-1 downto 0);
-          
-   signal SSMEM_Addr             : std_logic_vector(15 downto 0);
-   signal SSMEM_WrEn             : std_logic_vector(1 downto 0);
-   signal SSMEM_WriteData        : std_logic_vector(7 downto 0);
-   signal SSMEM_ReadData_REG     : std_logic_vector(7 downto 0);
-   signal SSMEM_ReadData_RAM     : std_logic_vector(7 downto 0);
 
    -- export
 -- synthesis translate_off
@@ -236,45 +181,13 @@ begin
    process (clk)
    begin
       if rising_edge(clk) then
-      
-         if (fastcounter_1_33x < 2) then
-            fastcounter_1_33x <= fastcounter_1_33x + 1;
-         else
-            fastcounter_1_33x <= 0;
-         end if;
-         
-         if (fastcounter_1_6x < 4) then
-            fastcounter_1_6x <= fastcounter_1_6x + 1;
-         else
-            fastcounter_1_6x <= 0;
-         end if;
-         
-         fastcounter_2x    <= not fastcounter_2x;
-      
-         ce_fast <= '0';
-         if (turbo = '1') then
-            ce_fast <= '1';
-         elsif (fastforward = '1') then
-            case (speedselect) is
-               when "00" =>                                                        ce_fast <= '1';         -- 400%
-               when "01" => if (fastcounter_1_33x = 2)                        then ce_fast <= '1'; end if; -- 133%
-               when "10" => if (fastcounter_1_6x = 2 or fastcounter_1_6x = 4) then ce_fast <= '1'; end if; -- 160%
-               when "11" => if (fastcounter_2x = '1')                         then ce_fast <= '1'; end if; -- 200%
-               when others => null;
-            end case;
-         end if; 
-         
-         if (reset = '1' or sleep_savestate = '1' or sleep_rewind = '1') then
+         if (reset = '1') then
             ce         <= '0';
             ce_counter <= (others => '0');
          elsif (pause_in = '0' or ce = '1') then
             ce_counter <= ce_counter + 1;
             ce <= '0'; 
-            if (fastforward = '1' or turbo = '1') then
-               if ((ce_counter = "11" and (savestate_slow = '1' or rewind_active = '1')) or (savestate_slow = '0' and rewind_active = '0' and ce_fast = '1')) then
-                   ce <= '1';
-               end if;
-            elsif (ce_counter = "11" ) then 
+            if (turbo = '1' or ce_counter = "11" ) then
                ce <= '1';
             end if;
          end if;
@@ -340,7 +253,7 @@ begin
       SSBUS_Adr      => SSBUS_Adr, 
       SSBUS_wren     => SSBUS_wren,
       SSBUS_rst      => SSBUS_rst, 
-      SSBUS_Dout     => ss_wired_or(0)
+      SSBUS_Dout     => open
    );
    
    -- timer
@@ -350,7 +263,7 @@ begin
       clk               => clk,        
       ce                => ce,         
       reset             => reset,      
-      fastforward       => fastforward,
+      fastforward       => '0',
       turbo             => turbo,
                                 
       RegBus_Din        => RegBus_Din, 
@@ -377,7 +290,7 @@ begin
       SSBUS_Adr         => SSBUS_Adr, 
       SSBUS_wren        => SSBUS_wren,
       SSBUS_rst         => SSBUS_rst, 
-      SSBUS_Dout        => ss_wired_or(1)
+      SSBUS_Dout        => open
    );
    
    -- Display DMA
@@ -419,26 +332,7 @@ begin
       SSBUS_Adr         => SSBUS_Adr, 
       SSBUS_wren        => SSBUS_wren,
       SSBUS_rst         => SSBUS_rst, 
-      SSBUS_Dout        => ss_wired_or(2) 
-   );
-   
-   -- cheats
-   ilynx_cheats : entity work.lynx_cheats
-   port map
-   (
-      clk            => clk,
-      reset          => reset_in,
-                     
-      cheat_clear    => cheat_clear,   
-      cheats_enabled => cheats_enabled,
-      cheat_on       => cheat_on,      
-      cheat_in       => cheat_in,      
-      cheats_active  => cheats_active, 
-                     
-      BusAddr        => cpu_bus_addr,
-      RAMaccess      => RAMaccess,
-      cheatOverwrite => cheatOverwrite,
-      cheatData      => cheatData
+      SSBUS_Dout        => open
    );
    
    -- Memory Mux
@@ -463,10 +357,6 @@ begin
       bus_datawrite        => bus_datawrite,
       bus_dataread         => bus_dataread, 
       bus_done             => bus_done,
-      
-      RAMaccess            => RAMaccess,
-      cheatOverwrite       => cheatOverwrite,
-      cheatData            => cheatData,
       
       RegBus_Din           => RegBus_Din,
       RegBus_Adr           => RegBus_Adr,
@@ -498,13 +388,13 @@ begin
       SSBUS_Adr            => SSBUS_Adr, 
       SSBUS_wren           => SSBUS_wren,
       SSBUS_rst            => SSBUS_rst, 
-      SSBUS_Dout           => ss_wired_or(3),
+      SSBUS_Dout           => open,
       
-      SSMEM_Addr           => SSMEM_Addr,        
-      SSMEM_WrEn           => SSMEM_WrEn,        
-      SSMEM_WriteData      => SSMEM_WriteData,   
-      SSMEM_ReadData_REG   => SSMEM_ReadData_REG,
-      SSMEM_ReadData_RAM   => SSMEM_ReadData_RAM
+      SSMEM_Addr           => x"0000",
+      SSMEM_WrEn           => "00",
+      SSMEM_WriteData      => x"00",
+      SSMEM_ReadData_REG   => open,
+      SSMEM_ReadData_RAM   => open
    );
    
    -- cpu
@@ -532,7 +422,7 @@ begin
       irqpending        => irqpending,  
       irqfinish         => irqfinish, 
 
-      load_savestate    => sleep_savestate,  
+      load_savestate    => '0',
       custom_PCAddr     => custom_PCAddr,
       custom_PCuse      => custom_PCuse,       
             
@@ -545,7 +435,7 @@ begin
       SSBUS_Adr         => SSBUS_Adr, 
       SSBUS_wren        => SSBUS_wren,
       SSBUS_rst         => SSBUS_rst, 
-      SSBUS_Dout        => ss_wired_or(4)
+      SSBUS_Dout        => open
    );
    
    -- math
@@ -566,7 +456,7 @@ begin
       SSBUS_Adr      => SSBUS_Adr,  
       SSBUS_wren     => SSBUS_wren, 
       SSBUS_rst      => SSBUS_rst,  
-      SSBUS_Dout     => ss_wired_or(5)
+      SSBUS_Dout     => open
    );
    
    -- joystick
@@ -618,7 +508,7 @@ begin
       SSBUS_Adr      => SSBUS_Adr,  
       SSBUS_wren     => SSBUS_wren, 
       SSBUS_rst      => SSBUS_rst,  
-      SSBUS_Dout     => ss_wired_or(6)
+      SSBUS_Dout     => open
    );
    
    -- gpu
@@ -642,7 +532,7 @@ begin
       cpu_idle       => cpu_idle,  
       dma_active     => dma_active,
       cpu_sleep      => cpu_sleep, 
-      load_savestate => sleep_savestate,
+      load_savestate => '0',
       gpu_idle       => gpu_idle,
       
       irqrequest_in  => IRQ_request,
@@ -662,7 +552,7 @@ begin
       SSBUS_Adr      => SSBUS_Adr,  
       SSBUS_wren     => SSBUS_wren, 
       SSBUS_rst      => SSBUS_rst,  
-      SSBUS_Dout     => ss_wired_or(7)
+      SSBUS_Dout     => open
    );
    
    --sound
@@ -690,7 +580,7 @@ begin
       SSBUS_Adr      => SSBUS_Adr,  
       SSBUS_wren     => SSBUS_wren, 
       SSBUS_rst      => SSBUS_rst,  
-      SSBUS_Dout     => ss_wired_or(8)
+      SSBUS_Dout     => open
    );
    
    -- fps overlay
@@ -737,92 +627,14 @@ begin
       bs93_wren      => bs93_wren
    );      
    
-   -- savestates
-   process (ss_wired_or)
-      variable wired_or : std_logic_vector(63 downto 0);
-   begin
-      wired_or := ss_wired_or(0);
-      for i in 1 to (ss_wired_or'length - 1) loop
-         wired_or := wired_or or ss_wired_or(i);
-      end loop;
-      SSBUS_Dout <= wired_or;
-   end process;
-   
-   system_idle <= '1' when (cpu_idle = '1' and gpu_idle = '1' and dma_active = '0' and cart_idle = '1') else '0';
+   -- State capture logic is disabled in Lynx2P to keep the multi-core build within MiSTer RAM.
+   reset            <= reset_in;
+   RegBus_rst       <= reset_in;
 
-   isavestates : entity work.savestates
-   port map
-   (
-      clk                     => clk,
-      ce                      => ce,
-      reset_in                => reset_in,
-      reset_out               => reset,
-      RegBus_rst              => RegBus_rst,
-            
-      load_done               => state_loaded,
-            
-      increaseSSHeaderCount   => increaseSSHeaderCount,
-      save                    => savestate_savestate,
-      load                    => savestate_loadstate,
-      savestate_address       => savestate_address,  
-      savestate_busy          => savestate_busy,    
-
-      system_idle             => system_idle,
-      savestate_slow          => savestate_slow,
-            
-      BUS_Din                 => SSBUS_Din, 
-      BUS_Adr                 => SSBUS_Adr, 
-      BUS_wren                => SSBUS_wren,
-      BUS_rst                 => SSBUS_rst, 
-      BUS_Dout                => SSBUS_Dout,
-            
-      loading_savestate       => open,
-      saving_savestate        => open,
-      sleep_savestate         => sleep_savestate,
-            
-      Save_RAMAddr            => SSMEM_Addr,        
-      Save_RAMWrEn            => SSMEM_WrEn,        
-      Save_RAMWriteData       => SSMEM_WriteData,   
-      Save_RAMReadData_REG    => SSMEM_ReadData_REG,
-      Save_RAMReadData_RAM    => SSMEM_ReadData_RAM,
-      
-      bus_out_Din             => SAVE_out_Din,
-      bus_out_Dout            => SAVE_out_Dout,
-      bus_out_Adr             => SAVE_out_Adr,
-      bus_out_rnw             => SAVE_out_rnw,
-      bus_out_ena             => SAVE_out_ena,
-      bus_out_be              => SAVE_out_be,
-      bus_out_done            => SAVE_out_done
-   );   
-   
-   istatemanager : entity work.statemanager
-   generic map
-   (
-      Softmap_SaveState_ADDR   => 58720256,
-      Softmap_Rewind_ADDR      => 33554432
-   )
-   port map
-   (
-      clk                 => clk,  
-      ce                  => ce,  
-      reset               => reset_in,
-                         
-      rewind_on           => rewind_on,    
-      rewind_active       => rewind_active,
-                        
-      savestate_number    => savestate_number,
-      save                => save_state,
-      load                => load_state,
-                       
-      sleep_rewind        => sleep_rewind,
-      vsync               => frameEnd,
-      system_idle         => system_idle,
-                 
-      request_savestate   => savestate_savestate,
-      request_loadstate   => savestate_loadstate,
-      request_address     => savestate_address,  
-      request_busy        => savestate_busy    
-   );
+   SSBUS_Din        <= (others => '0');
+   SSBUS_Adr        <= (others => '0');
+   SSBUS_wren       <= '0';
+   SSBUS_rst        <= reset_in;
    
    -- export
 -- synthesis translate_off
