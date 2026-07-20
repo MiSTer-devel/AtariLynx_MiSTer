@@ -125,29 +125,16 @@ begin
    begin
       if rising_edge(clk) then
          
-         if (index = 4) then
-            case (to_integer(unsigned(Reg_CTLA(2 downto 0)))) is
-               when 0 => prescaleborder <= 127;
-               when 1 => prescaleborder <= 255;
-               when 2 => prescaleborder <= 511;
-               when 3 => prescaleborder <= 1023;
-               when 4 => prescaleborder <= 2047;
-               when 5 => prescaleborder <= 4095;
-               when 6 => prescaleborder <= 8191;
-               when others => null;
-            end case;
-         else
-            case (to_integer(unsigned(Reg_CTLA(2 downto 0)))) is
-               when 0 => prescaleborder <= 15;
-               when 1 => prescaleborder <= 31;
-               when 2 => prescaleborder <= 63;
-               when 3 => prescaleborder <= 127;
-               when 4 => prescaleborder <= 255;
-               when 5 => prescaleborder <= 511;
-               when 6 => prescaleborder <= 1023;
-               when others => null;
-            end case;
-         end if;
+         case (to_integer(unsigned(Reg_CTLA(2 downto 0)))) is
+            when 0 => prescaleborder <= 15;
+            when 1 => prescaleborder <= 31;
+            when 2 => prescaleborder <= 63;
+            when 3 => prescaleborder <= 127;
+            when 4 => prescaleborder <= 255;
+            when 5 => prescaleborder <= 511;
+            when 6 => prescaleborder <= 1023;
+            when others => null;
+         end case;
             
          if (reset = '1') then
       

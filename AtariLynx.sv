@@ -184,9 +184,7 @@ assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 
-reg  sav_pending     = 0;
-
-assign LED_USER  = ioctl_download | sav_pending;
+assign LED_USER  = ioctl_download;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 assign BUTTONS   = 0;
@@ -202,64 +200,36 @@ assign AUDIO_MIX = status[8:7];
 // 0         1         2         3          4         5         6
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxx
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxx      xx
 
 `include "build_id.v" 
 localparam CONF_STR = {
-	"AtariLynx;SS3E000000:20000;",
-	"FS,LNXLYX;",
-    "-;",
-	"C,Cheats;",
-	"H1o7,Cheats Enabled,Yes,No;",
+	"AtariLynx2P;SS3E000000:20000;",
+	"FS1,LNXLYX,Load ROM;",
 	"-;",
-	"o4,Savestates to SDCard,On,Off;",
-	"o56,Savestate Slot,1,2,3,4;",
-	"h0RS,Save state (Alt-F1);",
-	"h0RT,Restore state (F1);",
+	"O[49:48],Lynx instances,2,3,4;",
+	"O[50],External ComLynx,Off,On;",
 	"-;",
 	"OQ,Pause when OSD is open,Off,On;",
 	"O9,CPU GPU Turbo,Off,On;",
-	"o01,Fastforward Speed,400%,133%,160%,200%;",
-	"OR,Rewind Capture,Off,On;",
 	"-;",
 	"P1,Audio & Video;",
 	"P1-;",
 	"P1OAB,Orientation,Horz,Vert,Vert180;",
-	"P1OF,240p Mode,Off,On;",
+	"P1O6,Separator Line,Off,On;",
 	"P1-;",
-	"P1ODE,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"P1O24,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-	"P1-;",
-	"P1o23,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"P1OGJ,CRT H-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1OKN,CRT V-Sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1-;",
 	"P1OO,Sync core to 60 Hz,Off,On;",
 	"P1oD,Video Timing for YC,Off,On;",
-	"P1O5,Buffer video,Off,On;",
-	"P1OUV,Flickerblend,Off,2 Frames,3 Frames;",
 	"P1OC,FPS Overlay,Off,On;",
 	"P1-;",
 	"P1O78,Stereo mix,none,25%,50%,100%;",
-	"P1OP,FastForward Sound,On,Off;",
+	"P1O[47:46],Audioselect,Lynx 1,Lynx 2,Mixed,Split odd/even;",
 	"-;",
 	"R0,Reset;",
-	"J1,A,B,Option1,Option2,Pause,FastForward,Savestates,Rewind;",
-	"I,",
-	"Slot=DPAD|Save/Load=Pause+DPAD,",
-	"Active Slot 1,",
-	"Active Slot 2,",
-	"Active Slot 3,",
-	"Active Slot 4,",
-	"Save to state 1,",
-	"Restore state 1,",
-	"Save to state 2,",
-	"Restore state 2,",
-	"Save to state 3,",
-	"Restore state 3,",
-	"Save to state 4,",
-	"Restore state 4,",
-	"Rewinding...;",
+	"J1,A,B,Option1,Option2,Pause;",
 	"V,v",`BUILD_DATE
 };
 
@@ -297,6 +267,12 @@ reg         ioctl_wait = 0;
 wire [15:0] joystick_0, joy0_unmod, joystick_1, joystick_2, joystick_3;
 wire [10:0] ps2_key;
 
+wire [2:0] lynx_count = (status[49:48] == 2'd0) ? 3'd2 :
+                        (status[49:48] == 2'd1) ? 3'd3 :
+                        3'd4;
+wire       lynx3_active = (lynx_count >= 3);
+wire       lynx4_active = (lynx_count >= 4);
+
 wire [7:0]  filetype;
 
 reg  [31:0] sd_lba = 0;
@@ -327,9 +303,9 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	.ioctl_index(filetype),
 	
 	.status(status),
-	.status_menumask({~gg_active, cart_ready}),
-	.status_in({status[63:39],ss_slot,status[36:0]}),
-	.status_set(statusUpdate),
+	.status_menumask(1'b0),
+	.status_in(status),
+	.status_set(1'b0),
 	
 	.sd_lba('{sd_lba}),
 	.sd_rd(sd_rd),
@@ -356,8 +332,8 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
 	
 	.ps2_key(ps2_key),
 	
-	.info_req(ss_info_req),
-	.info(ss_info),
+	.info_req(1'b0),
+	.info(8'd0),
 	
 	.TIMESTAMP(RTC_time)
 );
@@ -366,23 +342,50 @@ assign joystick_0 = joy0_unmod[10] ? 16'b0 : joy0_unmod;
 
 ///////////////////////////////////////////////////
 
-wire [15:0] cart_addr;
-wire cart_rd;
-wire cart_wr;
 reg cart_ready = 0;
 
 wire cart_download = ioctl_download && (filetype == 8'h01 || filetype == 8'h41 || filetype == 8'h80);
 wire bios_download = ioctl_download && (filetype == 8'h00);
-wire code_download = ioctl_download & &filetype;
 
 wire sdram_ack;
+wire sdram_ch1_ready;
+wire [15:0] sdram_ch1_dout;
 
-wire [19:0] rom_addr;
+wire [19:0] rom_addr1;
+wire [19:0] rom_addr2;
+wire [19:0] rom_addr3;
+wire [19:0] rom_addr4;
 wire [15:0] rom_din = 0;
-wire [15:0] rom_dout;
-wire  [7:0] rom_byte = rom_addr[0] ? rom_dout[15:8] : rom_dout[7:0];
-wire rom_req;
-wire rom_ack;
+wire [15:0] rom_dout1;
+wire [15:0] rom_dout2;
+wire [15:0] rom_dout3;
+wire [15:0] rom_dout4;
+wire  [7:0] rom_byte1 = rom_addr1[0] ? rom_dout1[15:8] : rom_dout1[7:0];
+wire  [7:0] rom_byte2 = rom_addr2[0] ? rom_dout2[15:8] : rom_dout2[7:0];
+wire  [7:0] rom_byte3 = rom_addr3[0] ? rom_dout3[15:8] : rom_dout3[7:0];
+wire  [7:0] rom_byte4 = rom_addr4[0] ? rom_dout4[15:8] : rom_dout4[7:0];
+wire rom_req1;
+wire rom_req2;
+wire rom_req3;
+wire rom_req4;
+wire rom_ack1;
+wire rom_ack2;
+wire rom_ack3;
+wire rom_ack4;
+
+reg old_download = 0;
+wire [26:1] sdram_ch1_addr = cart_download ? {7'd0, ioctl_addr[19:1]} :
+                                              {7'd0, rom_addr2[19:1]};
+wire        sdram_ch1_req  = cart_download ? ioctl_wr : rom_req2;
+wire        sdram_ch1_rnw  = ~cart_download;
+wire        sdram_ch4_ready;
+wire        sdram_ch5_ready;
+
+assign sdram_ack = cart_download & sdram_ch1_ready;
+assign rom_dout2 = sdram_ch1_dout;
+assign rom_ack2  = ~cart_download & sdram_ch1_ready;
+assign rom_ack3  = ~cart_download & lynx3_active & sdram_ch4_ready;
+assign rom_ack4  = ~cart_download & lynx4_active & sdram_ch5_ready;
 
 sdram sdram
 (
@@ -390,12 +393,12 @@ sdram sdram
 	.init(~pll_locked),
 	.clk(clk_sys),
 
-	.ch1_addr(ioctl_addr[24:1]),
+	.ch1_addr(sdram_ch1_addr),
 	.ch1_din(ioctl_dout),
-	.ch1_req(ioctl_wr),
-	.ch1_rnw(cart_download ? 1'b0 : 1'b1),
-	.ch1_ready(sdram_ack),
-   .ch1_dout(),
+	.ch1_req(sdram_ch1_req),
+	.ch1_rnw(sdram_ch1_rnw),
+	.ch1_ready(sdram_ch1_ready),
+   .ch1_dout(sdram_ch1_dout),
 
    // 32bit
 	.ch2_addr(0),
@@ -406,12 +409,28 @@ sdram sdram
    .ch2_ready(),
 
    // 16 bit
-	.ch3_addr(rom_addr[19:1]),
+	.ch3_addr({7'd0, rom_addr1[19:1]}),
 	.ch3_din(rom_din),
-	.ch3_dout(rom_dout),
-	.ch3_req(~cart_download & rom_req),
+	.ch3_dout(rom_dout1),
+	.ch3_req(~cart_download & rom_req1),
 	.ch3_rnw(1),
-	.ch3_ready(rom_ack)
+	.ch3_ready(rom_ack1),
+
+   // 16 bit
+	.ch4_addr({7'd0, rom_addr3[19:1]}),
+	.ch4_din(rom_din),
+	.ch4_dout(rom_dout3),
+	.ch4_req(~cart_download & lynx3_active & rom_req3),
+	.ch4_rnw(1),
+	.ch4_ready(sdram_ch4_ready),
+
+   // 16 bit
+	.ch5_addr({7'd0, rom_addr4[19:1]}),
+	.ch5_din(rom_din),
+	.ch5_dout(rom_dout4),
+	.ch5_req(~cart_download & lynx4_active & rom_req4),
+	.ch5_rnw(1),
+	.ch5_ready(sdram_ch5_ready)
 );
 
 always @(posedge clk_sys) begin
@@ -422,30 +441,107 @@ always @(posedge clk_sys) begin
 	else ioctl_wait <= 0;
 end
 
-reg old_download;
-reg [19:0] max_addr;
+reg [19:0] max_addr1 = 0;
+reg [19:0] max_addr2 = 0;
+reg [19:0] max_addr3 = 0;
+reg [19:0] max_addr4 = 0;
 always @(posedge clk_sys) begin
 	old_download <= cart_download;
 	if (old_download & ~cart_download) begin
-      max_addr   <= ioctl_addr[19:0];
+      max_addr1  <= ioctl_addr[19:0];
+      max_addr2  <= ioctl_addr[19:0];
+      max_addr3  <= ioctl_addr[19:0];
+      max_addr4  <= ioctl_addr[19:0];
       cart_ready <= 1;
    end
 end
 
-wire [15:0] Lynx_AUDIO_L;
-wire [15:0] Lynx_AUDIO_R;
+wire [15:0] Lynx1_AUDIO_L;
+wire [15:0] Lynx1_AUDIO_R;
+wire [15:0] Lynx2_AUDIO_L;
+wire [15:0] Lynx2_AUDIO_R;
+wire [15:0] Lynx3_AUDIO_L;
+wire [15:0] Lynx3_AUDIO_R;
+wire [15:0] Lynx4_AUDIO_L;
+wire [15:0] Lynx4_AUDIO_R;
 
-wire reset = (RESET | status[0] | buttons[1] | cart_download);
+reg [1:0] lynx_count_sel_d = 0;
+reg [7:0] lynx_count_reset = 0;
+always_ff @(posedge clk_sys) begin
+   lynx_count_sel_d <= status[49:48];
+   if (status[49:48] != lynx_count_sel_d) begin
+      lynx_count_reset <= 8'hFF;
+   end else if (lynx_count_reset != 0) begin
+      lynx_count_reset <= lynx_count_reset - 8'd1;
+   end
+end
 
-wire comlynx_tx;
-// ComLynx is an open-drain shared bus: USER port bit 0 is the single DATA line.
-wire comlynx_rx = USER_IN[0] & comlynx_tx;
+wire base_reset = (RESET | status[0] | buttons[1] | cart_download | (lynx_count_reset != 0));
 
-assign USER_OUT = {6'b111111, comlynx_tx};
+localparam [19:0] LYNX_RESET_DELAY2 = 20'd131072;
+localparam [19:0] LYNX_RESET_DELAY3 = 20'd262144;
+localparam [19:0] LYNX_RESET_DELAY4 = 20'd393216;
+
+reg [19:0] lynx_reset_hold2 = 0;
+reg [19:0] lynx_reset_hold3 = 0;
+reg [19:0] lynx_reset_hold4 = 0;
+
+always_ff @(posedge clk_sys) begin
+   if (base_reset) begin
+      lynx_reset_hold2 <= LYNX_RESET_DELAY2;
+      lynx_reset_hold3 <= LYNX_RESET_DELAY3;
+      lynx_reset_hold4 <= LYNX_RESET_DELAY4;
+   end else begin
+      if (lynx_reset_hold2 != 0) lynx_reset_hold2 <= lynx_reset_hold2 - 20'd1;
+      if (lynx_reset_hold3 != 0) lynx_reset_hold3 <= lynx_reset_hold3 - 20'd1;
+      if (lynx_reset_hold4 != 0) lynx_reset_hold4 <= lynx_reset_hold4 - 20'd1;
+   end
+end
+
+wire reset1 = base_reset;
+wire reset2 = base_reset | (lynx_reset_hold2 != 0);
+wire reset3 = base_reset | (lynx_reset_hold3 != 0) | ~lynx3_active;
+wire reset4 = base_reset | (lynx_reset_hold4 != 0) | ~lynx4_active;
+
+wire comlynx_tx1;
+wire comlynx_tx2;
+wire comlynx_tx3;
+wire comlynx_tx4;
+// ComLynx is an open-drain shared bus between all active internal Lynx instances.
+wire comlynx_drive = comlynx_tx1 & comlynx_tx2 &
+                     (lynx3_active ? comlynx_tx3 : 1'b1) &
+                     (lynx4_active ? comlynx_tx4 : 1'b1);
+wire external_comlynx = status[50];
+
+// Deglitch the external ComLynx input. The USER port line is open-drain and
+// rises only through the weak FPGA pull-ups, so rising edges are slow and can
+// chatter across the input threshold; the UART receivers are edge-sensitive
+// and would take each glitch as a false start bit. Require the synchronized
+// level to be stable for 16 clk (~0.25us at 64MHz, under 2% of a bit even at
+// 62500 baud) before it reaches the bus. The internal multi-core path is not
+// filtered.
+reg [1:0] comlynx_ext_sync = 2'b11;
+reg [3:0] comlynx_ext_cnt  = 4'd0;
+reg       comlynx_ext_filt = 1'b1;
+always_ff @(posedge clk_sys) begin
+   comlynx_ext_sync <= {comlynx_ext_sync[0], USER_IN[0]};
+   if (comlynx_ext_sync[1] == comlynx_ext_filt) begin
+      comlynx_ext_cnt <= 4'd0;
+   end else if (comlynx_ext_cnt == 4'd15) begin
+      comlynx_ext_filt <= comlynx_ext_sync[1];
+      comlynx_ext_cnt  <= 4'd0;
+   end else begin
+      comlynx_ext_cnt <= comlynx_ext_cnt + 1'd1;
+   end
+end
+
+wire comlynx_bus = external_comlynx ? (comlynx_ext_filt & comlynx_drive) : comlynx_drive;
+
+assign USER_OUT = {6'b111111, external_comlynx ? comlynx_drive : 1'b1};
 
 reg paused;
 always_ff @(posedge clk_sys) begin
-   paused <= (syncpaused || (status[26] && OSD_STATUS)) && ~status[27]; // no pause when rewind capture is on
+   paused <= syncpaused || (status[26] && OSD_STATUS);
 end
 
 reg [8:0]  bios_wraddr;
@@ -469,18 +565,18 @@ always @(posedge clk_sys) begin
 	end
 end
 
-LynxTop LynxTop (
+LynxTop LynxTop1 (
 	.clk              ( clk_sys),
-	.reset_in	      ( reset  ),
+	.reset_in	      ( reset1 ),
 	.pause_in	      ( paused ),
    
    // rom
-   .rom_addr         ( rom_addr ),
-   .rom_byte         ( rom_byte ),
-   .rom_req          ( rom_req  ),
-   .rom_ack          ( rom_ack  ),  
-   
-   .romsize          (max_addr),
+   .rom_addr         ( rom_addr1 ),
+   .rom_byte         ( rom_byte1 ),
+   .rom_req          ( rom_req1  ),
+   .rom_ack          ( rom_ack1  ),
+
+   .romsize          (max_addr1),
    .romwrite_data    (ioctl_dout),
    .romwrite_addr    (ioctl_addr[19:0]),
    .romwrite_wren    (cart_download & ioctl_wr),
@@ -496,13 +592,11 @@ LynxTop LynxTop (
 	.pixel_out_we     (pixel_we),          // new pixel for framebuffer
       
 	// audio 
-	.audio_l 	      (Lynx_AUDIO_L),
-	.audio_r 	      (Lynx_AUDIO_R),
+	.audio_l 	      (Lynx1_AUDIO_L),
+	.audio_r 	      (Lynx1_AUDIO_R),
 	
    //settings
-   .fastforward      ( fast_forward ),
    .turbo            ( status[9]    ),
-   .speedselect      ( status[33:32]),
    .fpsoverlay_on    ( status[12]   ),
    
    // joystick
@@ -515,35 +609,184 @@ LynxTop LynxTop (
    .KeyB             (joystick_0[5]),
    .KeyA             (joystick_0[4]),
    .KeyPause         (joystick_0[8]),
-   .comm_rx          (comlynx_rx),
-   .comm_tx          (comlynx_tx),
-   
-	// savestates
-   .increaseSSHeaderCount(!status[36]),
-	.save_state       (ss_save),
-	.load_state       (ss_load),
-	.savestate_number (ss_slot),
-	
-	.SAVE_out_Din     (ss_din),            // data read from savestate
-	.SAVE_out_Dout    (ss_dout),           // data written to savestate
-	.SAVE_out_Adr     (ss_addr),           // all addresses are DWORD addresses!
-	.SAVE_out_rnw     (ss_rnw),            // read = 1, write = 0
-	.SAVE_out_ena     (ss_req),            // one cycle high for each action
-	.SAVE_out_be      (ss_be),            
-	.SAVE_out_done    (ss_ack),            // should be one cycle high when write is done or read value is valid
-	
-	.rewind_on        (status[27]),
-	.rewind_active    (status[27] & joystick_0[11]),
-   
-   .cheat_clear(gg_reset),
-   .cheats_enabled(~status[39]),
-   .cheat_on(gg_valid),
-   .cheat_in(gg_code),
-   .cheats_active(gg_active)
+   .comm_rx          (comlynx_bus),
+   .comm_tx          (comlynx_tx1)
 );
 
-assign AUDIO_L = (fast_forward && status[25]) ? 16'd0 : Lynx_AUDIO_L;
-assign AUDIO_R = (fast_forward && status[25]) ? 16'd0 : Lynx_AUDIO_R;
+LynxTop LynxTop2 (
+	.clk              ( clk_sys),
+	.reset_in	      ( reset2 ),
+	.pause_in	      ( paused ),
+
+   // rom
+   .rom_addr         ( rom_addr2 ),
+   .rom_byte         ( rom_byte2 ),
+   .rom_req          ( rom_req2  ),
+   .rom_ack          ( rom_ack2  ),
+
+   .romsize          (max_addr2),
+   .romwrite_data    (ioctl_dout),
+   .romwrite_addr    (ioctl_addr[19:0]),
+   .romwrite_wren    (cart_download & ioctl_wr),
+
+   // bios
+   .bios_wraddr      (bios_wraddr),
+   .bios_wrdata      (bios_wrdata),
+   .bios_wr          (bios_wr    ),
+
+   // Video
+   .pixel_out_addr   (pixel_addr2),
+	.pixel_out_data   (pixel_data2),
+	.pixel_out_we     (pixel_we2),
+
+	// audio
+	.audio_l 	      (Lynx2_AUDIO_L),
+	.audio_r 	      (Lynx2_AUDIO_R),
+
+   //settings
+   .turbo            ( status[9]    ),
+   .fpsoverlay_on    ( status[12]   ),
+
+   // joystick
+   .JoyUP            ((orientation == 2) ? joystick_1[1] : (orientation == 1) ? joystick_1[0] : joystick_1[3]),
+   .JoyDown          ((orientation == 2) ? joystick_1[0] : (orientation == 1) ? joystick_1[1] : joystick_1[2]),
+   .JoyLeft          ((orientation == 2) ? joystick_1[2] : (orientation == 1) ? joystick_1[3] : joystick_1[1]),
+   .JoyRight         ((orientation == 2) ? joystick_1[3] : (orientation == 1) ? joystick_1[2] : joystick_1[0]),
+   .Option1          (joystick_1[6]),
+   .Option2          (joystick_1[7]),
+   .KeyB             (joystick_1[5]),
+   .KeyA             (joystick_1[4]),
+   .KeyPause         (joystick_1[8]),
+   .comm_rx          (comlynx_bus),
+   .comm_tx          (comlynx_tx2)
+);
+
+LynxTop LynxTop3 (
+	.clk              ( clk_sys),
+	.reset_in	      ( reset3 ),
+	.pause_in	      ( paused ),
+
+   // rom
+   .rom_addr         ( rom_addr3 ),
+   .rom_byte         ( rom_byte3 ),
+   .rom_req          ( rom_req3  ),
+   .rom_ack          ( rom_ack3  ),
+
+   .romsize          (max_addr3),
+   .romwrite_data    (ioctl_dout),
+   .romwrite_addr    (ioctl_addr[19:0]),
+   .romwrite_wren    (cart_download & ioctl_wr),
+
+   // bios
+   .bios_wraddr      (bios_wraddr),
+   .bios_wrdata      (bios_wrdata),
+   .bios_wr          (bios_wr    ),
+
+   // Video
+   .pixel_out_addr   (pixel_addr3),
+	.pixel_out_data   (pixel_data3),
+	.pixel_out_we     (pixel_we3),
+
+	// audio
+	.audio_l 	      (Lynx3_AUDIO_L),
+	.audio_r 	      (Lynx3_AUDIO_R),
+
+   //settings
+   .turbo            ( status[9]    ),
+   .fpsoverlay_on    ( status[12]   ),
+
+   // joystick
+   .JoyUP            ((orientation == 2) ? joystick_2[1] : (orientation == 1) ? joystick_2[0] : joystick_2[3]),
+   .JoyDown          ((orientation == 2) ? joystick_2[0] : (orientation == 1) ? joystick_2[1] : joystick_2[2]),
+   .JoyLeft          ((orientation == 2) ? joystick_2[2] : (orientation == 1) ? joystick_2[3] : joystick_2[1]),
+   .JoyRight         ((orientation == 2) ? joystick_2[3] : (orientation == 1) ? joystick_2[2] : joystick_2[0]),
+   .Option1          (joystick_2[6]),
+   .Option2          (joystick_2[7]),
+   .KeyB             (joystick_2[5]),
+   .KeyA             (joystick_2[4]),
+   .KeyPause         (joystick_2[8]),
+   .comm_rx          (comlynx_bus),
+   .comm_tx          (comlynx_tx3)
+);
+
+LynxTop LynxTop4 (
+	.clk              ( clk_sys),
+	.reset_in	      ( reset4 ),
+	.pause_in	      ( paused ),
+
+   // rom
+   .rom_addr         ( rom_addr4 ),
+   .rom_byte         ( rom_byte4 ),
+   .rom_req          ( rom_req4  ),
+   .rom_ack          ( rom_ack4  ),
+
+   .romsize          (max_addr4),
+   .romwrite_data    (ioctl_dout),
+   .romwrite_addr    (ioctl_addr[19:0]),
+   .romwrite_wren    (cart_download & ioctl_wr),
+
+   // bios
+   .bios_wraddr      (bios_wraddr),
+   .bios_wrdata      (bios_wrdata),
+   .bios_wr          (bios_wr    ),
+
+   // Video
+   .pixel_out_addr   (pixel_addr4),
+	.pixel_out_data   (pixel_data4),
+	.pixel_out_we     (pixel_we4),
+
+	// audio
+	.audio_l 	      (Lynx4_AUDIO_L),
+	.audio_r 	      (Lynx4_AUDIO_R),
+
+   //settings
+   .turbo            ( status[9]    ),
+   .fpsoverlay_on    ( status[12]   ),
+
+   // joystick
+   .JoyUP            ((orientation == 2) ? joystick_3[1] : (orientation == 1) ? joystick_3[0] : joystick_3[3]),
+   .JoyDown          ((orientation == 2) ? joystick_3[0] : (orientation == 1) ? joystick_3[1] : joystick_3[2]),
+   .JoyLeft          ((orientation == 2) ? joystick_3[2] : (orientation == 1) ? joystick_3[3] : joystick_3[1]),
+   .JoyRight         ((orientation == 2) ? joystick_3[3] : (orientation == 1) ? joystick_3[2] : joystick_3[0]),
+   .Option1          (joystick_3[6]),
+   .Option2          (joystick_3[7]),
+   .KeyB             (joystick_3[5]),
+   .KeyA             (joystick_3[4]),
+   .KeyPause         (joystick_3[8]),
+   .comm_rx          (comlynx_bus),
+   .comm_tx          (comlynx_tx4)
+);
+
+wire signed [15:0] audio_mix_l_2 = $signed(Lynx1_AUDIO_L[15:1]) + $signed(Lynx2_AUDIO_L[15:1]);
+wire signed [15:0] audio_mix_r_2 = $signed(Lynx1_AUDIO_R[15:1]) + $signed(Lynx2_AUDIO_R[15:1]);
+wire signed [15:0] audio_mix_l_4 = $signed(Lynx1_AUDIO_L[15:2]) + $signed(Lynx2_AUDIO_L[15:2]) +
+                                   (lynx3_active ? $signed(Lynx3_AUDIO_L[15:2]) : 16'sd0) +
+                                   (lynx4_active ? $signed(Lynx4_AUDIO_L[15:2]) : 16'sd0);
+wire signed [15:0] audio_mix_r_4 = $signed(Lynx1_AUDIO_R[15:2]) + $signed(Lynx2_AUDIO_R[15:2]) +
+                                   (lynx3_active ? $signed(Lynx3_AUDIO_R[15:2]) : 16'sd0) +
+                                   (lynx4_active ? $signed(Lynx4_AUDIO_R[15:2]) : 16'sd0);
+
+wire signed [15:0] audio_mono1 = $signed(Lynx1_AUDIO_L[15:1]) + $signed(Lynx1_AUDIO_R[15:1]);
+wire signed [15:0] audio_mono2 = $signed(Lynx2_AUDIO_L[15:1]) + $signed(Lynx2_AUDIO_R[15:1]);
+wire signed [15:0] audio_mono3 = $signed(Lynx3_AUDIO_L[15:1]) + $signed(Lynx3_AUDIO_R[15:1]);
+wire signed [15:0] audio_mono4 = $signed(Lynx4_AUDIO_L[15:1]) + $signed(Lynx4_AUDIO_R[15:1]);
+wire signed [15:0] audio_split_l = lynx3_active ? $signed(audio_mono1[15:1]) + $signed(audio_mono3[15:1]) : audio_mono1;
+wire signed [15:0] audio_split_r = lynx4_active ? $signed(audio_mono2[15:1]) + $signed(audio_mono4[15:1]) : audio_mono2;
+
+wire signed [15:0] audio_l_out =
+   (status[47:46] == 2'd0) ? $signed(Lynx1_AUDIO_L) :
+   (status[47:46] == 2'd1) ? $signed(Lynx2_AUDIO_L) :
+   (status[47:46] == 2'd2) ? (lynx3_active ? audio_mix_l_4 : audio_mix_l_2) :
+                              audio_split_l;
+
+wire signed [15:0] audio_r_out =
+   (status[47:46] == 2'd0) ? $signed(Lynx1_AUDIO_R) :
+   (status[47:46] == 2'd1) ? $signed(Lynx2_AUDIO_R) :
+   (status[47:46] == 2'd2) ? (lynx3_active ? audio_mix_r_4 : audio_mix_r_2) :
+                              audio_split_r;
+
+assign AUDIO_L = audio_l_out;
+assign AUDIO_R = audio_r_out;
 assign AUDIO_S = 1;
 
 ////////////////////////////  VIDEO  ////////////////////////////////////
@@ -551,38 +794,27 @@ assign AUDIO_S = 1;
 wire [13:0] pixel_addr;
 wire [11:0] pixel_data;
 wire        pixel_we;
-
-wire buffervideo = status[5] | status[31]; // OSD option for buffer or flickerblend on
+wire [13:0] pixel_addr2;
+wire [11:0] pixel_data2;
+wire        pixel_we2;
+wire [13:0] pixel_addr3;
+wire [11:0] pixel_data3;
+wire        pixel_we3;
+wire [13:0] pixel_addr4;
+wire [11:0] pixel_data4;
+wire        pixel_we4;
 
 reg [11:0] vram1[16320];
 reg [11:0] vram2[16320];
 reg [11:0] vram3[16320];
-reg [1:0] buffercnt_write    = 0;
-reg [1:0] buffercnt_readnext = 0;
-reg [1:0] buffercnt_read     = 0;
-reg [1:0] buffercnt_last     = 0;
-reg       syncpaused         = 0;
+reg [11:0] vram4[16320];
+reg        syncpaused = 0;
 
 always @(posedge clk_sys) begin
-   if (buffervideo) begin
-      if(pixel_we && pixel_addr == 16319) begin
-         buffercnt_readnext <= buffercnt_write;
-         if (buffercnt_write < 2) begin
-            buffercnt_write <= buffercnt_write + 1'd1;
-         end else begin
-            buffercnt_write <= 0;
-         end
-      end
-   end else begin
-      buffercnt_write    <= 0;
-      buffercnt_readnext <= 0;
-   end
-   
-   if(pixel_we) begin
-      if (buffercnt_write == 0) vram1[pixel_addr] <= pixel_data;
-      if (buffercnt_write == 1) vram2[pixel_addr] <= pixel_data;
-      if (buffercnt_write == 2) vram3[pixel_addr] <= pixel_data;
-   end
+   if(pixel_we)  vram1[pixel_addr]   <= pixel_data;
+   if(pixel_we2) vram2[pixel_addr2]  <= pixel_data2;
+   if(pixel_we3) vram3[pixel_addr3]  <= pixel_data3;
+   if(pixel_we4) vram4[pixel_addr4]  <= pixel_data4;
    
    if (y > 150) begin
       syncpaused <= 0;
@@ -592,50 +824,40 @@ always @(posedge clk_sys) begin
 
 end
 
-reg  [11:0] rgb0;
 reg  [11:0] rgb1;
 reg  [11:0] rgb2;
+reg  [11:0] rgb3;
+reg  [11:0] rgb4;
+reg  [1:0]  rgb_core;
+reg         rgb_blank;
 
 always @(posedge CLK_VIDEO) begin
-   rgb0 <= vram1[px_addr];
-   rgb1 <= vram2[px_addr];
-   rgb2 <= vram3[px_addr];
+   rgb1 <= vram1[px_addr1];
+   rgb2 <= vram2[px_addr2];
+   rgb3 <= vram3[px_addr3];
+   rgb4 <= vram4[px_addr4];
+   rgb_core <= px_core;
+   rgb_blank <= px_blank;
 end 
 
-wire [13:0] px_addr;
+reg [13:0] px_addr1 = 0;
+reg [13:0] px_addr2 = 0;
+reg [13:0] px_addr3 = 0;
+reg [13:0] px_addr4 = 0;
+reg [1:0]  px_core = 0;
+reg        px_blank = 0;
 
-wire [11:0] rgb_last = (buffercnt_last == 0) ? rgb0 :
-                       (buffercnt_last == 1) ? rgb1 :
-                       rgb2;
-
-wire [11:0] rgb_now = (buffercnt_read == 0) ? rgb0 :
-                      (buffercnt_read == 1) ? rgb1 :
-                      rgb2;
-  
-wire [4:0] r2_5 = rgb_now[11:8] + rgb_last[11:8];
-wire [4:0] g2_5 = rgb_now[ 7:4] + rgb_last[ 7:4];
-wire [4:0] b2_5 = rgb_now[ 3:0] + rgb_last[ 3:0];  
-                                
-wire [5:0] r3_6 = rgb0[11:8] + rgb1[11:8] + rgb2[11:8];
-wire [5:0] g3_6 = rgb0[ 7:4] + rgb1[ 7:4] + rgb2[ 7:4];
-wire [5:0] b3_6 = rgb0[ 3:0] + rgb1[ 3:0] + rgb2[ 3:0];
-
-wire [7:0] r3_8 = {r3_6, r3_6[5:4]};
-wire [7:0] g3_8 = {g3_6, g3_6[5:4]};
-wire [7:0] b3_8 = {b3_6, b3_6[5:4]};
-
-wire [23:0] r3_mul24 = r3_8 * 16'D21845; 
-wire [23:0] g3_mul24 = g3_8 * 16'D21845; 
-wire [23:0] b3_mul24 = b3_8 * 16'D21845; 
-
-wire [23:0] r3_div24 = r3_mul24 / 16'D16384; 
-wire [23:0] g3_div24 = g3_mul24 / 16'D16384; 
-wire [23:0] b3_div24 = b3_mul24 / 16'D16384; 
+wire [11:0] rgb_now_sel = (rgb_core == 2'd0) ? rgb1 :
+                          (rgb_core == 2'd1) ? rgb2 :
+                          (rgb_core == 2'd2) ? rgb3 :
+                          rgb4;
+wire [11:0] rgb_now = rgb_blank ? 12'd0 : rgb_now_sel;
                   
 reg hs, vs, hbl, vbl, ce_pix;
 reg [7:0] r,g,b;
 reg [1:0] orientation;
-reg [1:0] videomode;
+reg [2:0] videomode;
+reg [2:0] active_lynx_video = 3'd2;
 reg [8:0] x,y;
 reg [3:0] div;
 reg signed [3:0] HShift;
@@ -644,20 +866,40 @@ reg [9:0] HDisplayHFreqMode;
 reg [8:0] VDisplayHFreqMode;
 reg signed [3:0] HShiftHFreqMode;
 reg signed [3:0] VShiftHFreqMode;  
-reg hbl_1;
-reg evenline;
+function automatic [13:0] lynx_pix_addr(input [8:0] sx, input [8:0] sy);
+   reg [13:0] sy_ext;
+   begin
+      sy_ext = {6'd0, sy[7:0]};
+      lynx_pix_addr = (sy_ext << 7) + (sy_ext << 5) + {6'd0, sx[7:0]};
+   end
+endfunction
 
 // If video timing changes, force mode update
-reg [1:0] video_status;
+reg [4:0] video_status;
+wire [4:0] video_status_now = {status[49:48], status[45], status[11:10]};
 reg new_vmode = 0;
 always @(posedge clk_sys) begin
-    if (video_status != status[45]) begin
-        video_status <= status[45];
+    if (video_status != video_status_now) begin
+        video_status <= video_status_now;
         new_vmode <= ~new_vmode;
     end
 end
 
+wire wide_vertical_video = (videomode == 3'd1 || videomode == 3'd2) && (active_lynx_video > 3'd2);
+wire signed [10:0] hsync_start_signed = wide_vertical_video ? 11'sd410 : (11'sd350 + $signed(HShift));
+wire [9:0] hsync_start = hsync_start_signed[9:0];
+wire [9:0] hsync_end   = hsync_start + 10'd32;
+
+wire separator_line = status[6];
+
 always @(posedge CLK_VIDEO) begin
+   integer src_x;
+   integer src_y;
+   integer local_x;
+   integer local_y;
+   integer screen_idx;
+   integer map_valid;
+   logic draw_separator;
 
    if (div < 8) div <= div + 1'd1; else div <= 0; // 64mhz / 9 => 7,11Mhz Pixelclock
 
@@ -665,29 +907,38 @@ always @(posedge CLK_VIDEO) begin
 	if(!div) begin
 		ce_pix <= 1;
 
-      if (status[31:30] == 0) begin // flickerblend off
+      // Optional black separator lines along the seams between adjacent Lynx
+      // screens. Boundaries mirror the compositor's own screen mapping for
+      // each videomode and active screen count.
+      draw_separator = separator_line && !hbl && !vbl &&
+         (((videomode == 0) && (x == 9'd159 || x == 9'd160)) ||
+          ((videomode == 4) && ((x == 9'd159 || x == 9'd160) ||
+                                (y == 40+101+$signed(VShift)) ||
+                                (y == 40+102+$signed(VShift)))) ||
+          (((videomode == 1) || (videomode == 2)) &&
+             ((x == 9'd101 || x == 9'd102) ||
+              ((active_lynx_video > 3'd2) && (x == 9'd203 || x == 9'd204)) ||
+              ((active_lynx_video > 3'd3) && (x == 9'd305 || x == 9'd306)))));
+
+      if (draw_separator) begin
+         r <= 8'd0;
+         g <= 8'd0;
+         b <= 8'd0;
+      end else begin
          r <= {rgb_now[11:8], rgb_now[11:8]};
          g <= {rgb_now[7:4] , rgb_now[7:4] };
          b <= {rgb_now[3:0] , rgb_now[3:0] };
-      end else if (status[31:30] == 1) begin // flickerblend 2 frames
-         r <= {r2_5, r2_5[4:2]};
-         g <= {g2_5, g2_5[4:2]};
-         b <= {b2_5, b2_5[4:2]};
-      end else begin // flickerblend 3 frames
-         r <= r3_div24[7:0];
-         g <= g3_div24[7:0];
-         b <= b3_div24[7:0];
       end
 
       if (videomode == 0) begin
-         if(x == 160)     hbl <= 1;
+         if(x == 320)     hbl <= 1;
          if(y == 120)     vbl <= 0;
          if(y >= 120+102) vbl <= 1;
       end else if (videomode == 1 || videomode == 2) begin
-         if(x == 102)     hbl <= 1;
+         if(x == (wide_vertical_video ? 408 : 204)) hbl <= 1;
          if(y == 62)      vbl <= 0;
          if(y >= 62+160)  vbl <= 1;
-      end else if (videomode == 3) begin
+      end else if (videomode == 4) begin
          if(x == 320)                     hbl <= 1;
          if(y == 40+$signed(VShift))      vbl <= 0;
          if(y >= 40+204+$signed(VShift))  vbl <= 1;
@@ -697,48 +948,112 @@ always @(posedge CLK_VIDEO) begin
          hbl <= 0;
       end  
        
-		if(x == 350 + $signed(HShift)) begin
+		if(x == hsync_start) begin
 			hs <= 1;
 			if(y == 1)   vs <= 1;
 			if(y == 4)   vs <= 0;
 		end
 
-		if(x == 350+32+$signed(HShift)) hs  <= 0;
+		if(x == hsync_end) hs  <= 0;
 
 	end
 
-	if(ce_pix) begin
+   if(ce_pix) begin
    
-      hbl_1 <= hbl;
+      px_core <= 2'd0;
+      px_blank <= 1'b1;
+      px_addr1 <= 14'd0;
+      px_addr2 <= 14'd0;
+      px_addr3 <= 14'd0;
+      px_addr4 <= 14'd0;
+      map_valid = 0;
+      screen_idx = 0;
+      src_x = 0;
+      src_y = 0;
 
-      if (videomode == 0) begin
-         if(vbl) px_addr <= 0;
-         else begin 
-            if(!hbl) px_addr <= px_addr + 1'd1;
-         end
-      end else if (videomode == 1) begin
-         if(!hbl) begin 
-            px_addr <= px_addr - 8'd160;
+      if (videomode == 0 && !hbl && !vbl && x < 320) begin
+         src_y = y - 120;
+         if (src_y < 0) src_y = 0;
+         if (src_y > 101) src_y = 101;
+         if (x < 160) begin
+            src_x = x;
+            px_addr1 <= lynx_pix_addr(src_x[8:0], src_y[8:0]);
          end else begin
-            px_addr <= (8'd101 * 8'd160) + (y - 6'd61);
+            src_x = x - 160;
+            if (src_x > 159) src_x = 159;
+            screen_idx = 1;
          end
-      end else if (videomode == 2) begin
-         if(!hbl) begin 
-            px_addr <= px_addr + 8'd160;
+         map_valid = 1;
+      end else if (videomode == 1 && !hbl && !vbl && x < (wide_vertical_video ? 408 : 204)) begin
+         if (x < 102) begin
+            local_x = x;
+            screen_idx = 0;
+         end else if (x < 204) begin
+            local_x = x - 102;
+            screen_idx = 1;
+         end else if (x < 306) begin
+            local_x = x - 204;
+            screen_idx = 2;
          end else begin
-            px_addr <= 8'd220 - y;
+            local_x = x - 306;
+            screen_idx = 3;
          end
-      end else if (videomode == 3) begin
-         if(vbl) begin
-            px_addr  <= 0;
-            evenline <= 1'b0;
-         end else if(!hbl) begin 
-            if (x[0] == 1'b1) begin
-               px_addr <= px_addr + 1'd1;
-            end
-         end else if (hbl && ~hbl_1) begin
-            evenline <= ~evenline;
-            if (~evenline) px_addr <= px_addr - 8'd160;
+         src_x = y - 62;
+         if (src_x < 0) src_x = 0;
+         if (src_x > 159) src_x = 159;
+         src_y = 101 - local_x;
+         if (src_y < 0) src_y = 0;
+         map_valid = 1;
+      end else if (videomode == 2 && !hbl && !vbl && x < (wide_vertical_video ? 408 : 204)) begin
+         if (x < 102) begin
+            local_x = x;
+            screen_idx = 0;
+         end else if (x < 204) begin
+            local_x = x - 102;
+            screen_idx = 1;
+         end else if (x < 306) begin
+            local_x = x - 204;
+            screen_idx = 2;
+         end else begin
+            local_x = x - 306;
+            screen_idx = 3;
+         end
+         src_x = 221 - y;
+         if (src_x < 0) src_x = 0;
+         if (src_x > 159) src_x = 159;
+         src_y = local_x;
+         if (src_y > 101) src_y = 101;
+         map_valid = 1;
+      end else if (videomode == 4 && !hbl && !vbl && x < 320) begin
+         local_y = y - (40 + $signed(VShift));
+         if (local_y < 0) local_y = 0;
+         if (local_y > 203) local_y = 203;
+         if (x < 160) begin
+            src_x = x;
+            screen_idx = (local_y < 102) ? 0 : 2;
+         end else begin
+            src_x = x - 160;
+            if (src_x > 159) src_x = 159;
+            screen_idx = (local_y < 102) ? 1 : 3;
+         end
+         src_y = (local_y < 102) ? local_y : (local_y - 102);
+         map_valid = 1;
+      end
+
+      if (map_valid && screen_idx < active_lynx_video) begin
+         px_blank <= 1'b0;
+         if (screen_idx == 0) begin
+            px_core <= 2'd0;
+            px_addr1 <= lynx_pix_addr(src_x[8:0], src_y[8:0]);
+         end else if (screen_idx == 1) begin
+            px_core <= 2'd1;
+            px_addr2 <= lynx_pix_addr(src_x[8:0], src_y[8:0]);
+         end else if (screen_idx == 2) begin
+            px_core <= 2'd2;
+            px_addr3 <= lynx_pix_addr(src_x[8:0], src_y[8:0]);
+         end else begin
+            px_core <= 2'd3;
+            px_addr4 <= lynx_pix_addr(src_x[8:0], src_y[8:0]);
          end
       end
 
@@ -748,22 +1063,24 @@ always @(posedge CLK_VIDEO) begin
 			if (~&y) y <= y + 1'd1;
 			if (y >= VDisplayHFreqMode) begin
             y              <= 0;
-            buffercnt_read <= buffercnt_readnext;
-            buffercnt_last <= buffercnt_read;
             
             orientation <= status[11:10];
+            active_lynx_video <= lynx_count;
             HShift      <= status[19:16] + HShiftHFreqMode;
             VShift      <= status[23:20] - VShiftHFreqMode;
 			HShiftHFreqMode <= (status[45] ? 4'd7 : 4'd0); // Screen Adjust when Y/C Selected
 			VShiftHFreqMode <= (status[45] ? 4'd5 : 4'd0); // Screen Adjust when Y/C Selected
 			HDisplayHFreqMode <= (status[45] ? 10'd451 : 10'd444); // Change Video Timing for for Y/C Composite Video 
-			VDisplayHFreqMode <= (status[45] ? 9'd264 : 9'd269); // Change Video Timing for for Y/C Composite Video
-            if (status[15]) begin
-               videomode = 3; // 320*204, 60Hz
+            VDisplayHFreqMode <= (status[45] ? 9'd264 : 9'd269); // Change Video Timing for for Y/C Composite Video
+            if (status[11:10] == 0) begin
+               if (lynx_count > 2) begin
+                  videomode = 4; // 320*204 four-screen 2x2 grid, 60Hz
+               end else begin
+                  videomode = 0; // 320*102 dual-screen, 60Hz
+               end
             end else begin
-               if (status[11:10] == 0) videomode = 0; // 160*102, 60Hz
-               if (status[11:10] == 1) videomode = 1; // 102*160, 60Hz
-               if (status[11:10] == 2) videomode = 2; // 102*160, 60Hz, 180 degree rotated
+               if (status[11:10] == 1) videomode = 1; // 204/408*160 vertical strip, 60Hz
+               if (status[11:10] == 2) videomode = 2; // 204/408*160 vertical strip, 180 degree rotated
             end
             
          end
@@ -773,174 +1090,29 @@ always @(posedge CLK_VIDEO) begin
 
 end
 
-assign VGA_F1 = 0;
-assign VGA_SL = sl[1:0];
+assign VGA_SL = 2'b00;
+assign CE_PIXEL = ce_pix;
+assign VGA_R = r;
+assign VGA_G = g;
+assign VGA_B = b;
+assign VGA_HS = hs;
+assign VGA_VS = vs;
+assign VGA_DE = ~(hbl | vbl);
 
-wire [2:0] scale = status[4:2];
-wire [2:0] sl = scale ? scale - 1'd1 : 3'd0;
-wire       scandoubler = (scale || forced_scandoubler);
+wire [11:0] native_arx = (orientation > 0) ? ((active_lynx_video > 2) ? 12'd408 : 12'd204) : 12'd320;
+wire [11:0] native_ary = (orientation > 0) ? 12'd160 :
+                          ((active_lynx_video > 2) ? 12'd204 : 12'd102);
+assign VIDEO_ARX = {1'b0, native_arx};
+assign VIDEO_ARY = {1'b0, native_ary};
 
-wire [7:0] r_in = r;
-wire [7:0] g_in = g;
-wire [7:0] b_in = b;
-
-video_mixer #(.LINE_LENGTH(520), .GAMMA(1)) video_mixer
-(
-	.*,
-	.hq2x(scale==1),
-	.freeze_sync(),
-	.HSync(hs),
-	.VSync(vs),
-	.HBlank(hbl),
-	.VBlank(vbl),
-	.R(r_in),
-	.G(g_in),
-	.B(b_in)
-);
-
-wire [1:0] ar = status[14:13];
-video_freak video_freak
-(
-	.*,
-	.VGA_DE_IN(VGA_DE),
-	.VGA_DE(),
-
-	.ARX((!ar) ? (orientation > 0 && !status[15]) ? 12'd102 : 12'd160 : (ar - 1'd1)),
-	.ARY((!ar) ? (orientation > 0 && !status[15]) ? 12'd160 : 12'd102 : 12'd0      ),
-	.CROP_SIZE(0),
-	.CROP_OFF(0),
-	.SCALE(status[35:34])
-);
-
-///////////////////////////// Fast Forward Latch /////////////////////////////////
-
-reg fast_forward;
-reg ff_latch;
-
-wire fastforward = joystick_0[9] && !ioctl_download && !OSD_STATUS;
-wire ff_on;
-
-always @(posedge clk_sys) begin : ffwd
-	reg last_ffw;
-	reg ff_was_held;
-	longint ff_count;
-
-	last_ffw <= fastforward;
-
-	if (fastforward)
-		ff_count <= ff_count + 1;
-
-	if (~last_ffw & fastforward) begin
-		ff_latch <= 0;
-		ff_count <= 0;
-	end
-
-	if ((last_ffw & ~fastforward)) begin // 64mhz clock, 0.2 seconds
-		ff_was_held <= 0;
-
-		if (ff_count < 6400000 && ~ff_was_held) begin
-			ff_was_held <= 1;
-			ff_latch <= 1;
-		end
-	end
-
-	fast_forward <= (fastforward | ff_latch);
-end
-
-///////////////////////////// savestates /////////////////////////////////
-
-wire [63:0] SaveStateBus_Din; 
-wire [9:0]  SaveStateBus_Adr; 
-wire        SaveStateBus_wren;
-wire        SaveStateBus_rst; 
-wire [63:0] SaveStateBus_Dout;
-wire        savestate_load;
-	
-wire [63:0] ss_dout, ss_din;
-wire [27:2] ss_addr;
-wire  [7:0] ss_be;
-wire        ss_rnw, ss_req, ss_ack;
+///////////////////////////// Unused DDRAM Interface /////////////////////////////////
 
 assign DDRAM_CLK = clk_sys;
-ddram ddram
-(
-	.*,
-
-	.ch1_addr({ss_addr, 1'b0}),
-	.ch1_din(ss_din),
-	.ch1_dout(ss_dout),
-	.ch1_req(ss_req),
-	.ch1_rnw(ss_rnw),
-	.ch1_be(ss_be),
-	.ch1_ready(ss_ack)
-);
-
-// saving with keyboard/OSD/gamepad
-wire [1:0] ss_slot;
-wire [7:0] ss_info;
-wire ss_save, ss_load, ss_info_req;
-wire statusUpdate;
-
-savestate_ui savestate_ui
-(
-	.clk            (clk_sys       ),
-	.ps2_key        (ps2_key[10:0] ),
-	.allow_ss       (cart_ready    ),
-	.joySS          (joy0_unmod[10]),
-	.joyRight       (joy0_unmod[0] ),
-	.joyLeft        (joy0_unmod[1] ),
-	.joyDown        (joy0_unmod[2] ),
-	.joyUp          (joy0_unmod[3] ),
-	.joyStart       (joy0_unmod[8] ),
-	.joyRewind      (joy0_unmod[11]),
-	.rewindEnable   (status[27]    ), 
-	.status_slot    (status[38:37] ),
-	.OSD_saveload   (status[29:28] ),
-	.ss_save        (ss_save       ),
-	.ss_load        (ss_load       ),
-	.ss_info_req    (ss_info_req   ),
-	.ss_info        (ss_info       ),
-	.statusUpdate   (statusUpdate  ),
-	.selected_slot  (ss_slot       )
-);
-defparam savestate_ui.INFO_TIMEOUT_BITS = 27;
-
-////////////////////////////  CODES  ///////////////////////////////////
-
-// Code layout:
-// {code flags,     32'b address, 32'b compare, 32'b replace}
-//  127:96          95:64         63:32         31:0
-// Integer values are in BIG endian byte order, so it up to the loader
-// or generator of the code to re-arrange them correctly.
-reg [127:0] gg_code;
-reg gg_valid;
-reg gg_reset;
-reg ioctl_download_1;
-wire gg_active;
-always_ff @(posedge clk_sys) begin
-
-   gg_reset <= 0;
-   ioctl_download_1 <= ioctl_download;
-	if (ioctl_download && ~ioctl_download_1 && filetype == 255) begin
-      gg_reset <= 1;
-   end
-
-   gg_valid <= 0;
-	if (code_download & ioctl_wr) begin
-		case (ioctl_addr[3:0])
-			0:  gg_code[111:96]  <= ioctl_dout; // Flags Bottom Word
-			2:  gg_code[127:112] <= ioctl_dout; // Flags Top Word
-			4:  gg_code[79:64]   <= ioctl_dout; // Address Bottom Word
-			6:  gg_code[95:80]   <= ioctl_dout; // Address Top Word
-			8:  gg_code[47:32]   <= ioctl_dout; // Compare Bottom Word
-			10: gg_code[63:48]   <= ioctl_dout; // Compare top Word
-			12: gg_code[15:0]    <= ioctl_dout; // Replace Bottom Word
-			14: begin
-				gg_code[31:16]    <= ioctl_dout; // Replace Top Word
-				gg_valid          <= 1;          // Clock it in
-			end
-		endcase
-	end
-end
+assign DDRAM_BURSTCNT = 8'd0;
+assign DDRAM_ADDR = 29'd0;
+assign DDRAM_RD = 1'b0;
+assign DDRAM_DIN = 64'd0;
+assign DDRAM_BE = 8'd0;
+assign DDRAM_WE = 1'b0;
 
 endmodule

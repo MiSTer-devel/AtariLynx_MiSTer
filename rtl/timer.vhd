@@ -258,7 +258,7 @@ begin
       SSBUS_Dout        => ss_wired_or(4)
    );
    
-   IRQ_single(4) <= irq_serial;
+   IRQ_single(4) <= irq_serial and timerticks(4);
    
    
    itimer_module5 : entity work.timer_module 
@@ -358,7 +358,8 @@ begin
    
    newstatus <= irq_status and (not Reg_INTRST);
    
-   IRQ_out <= '1' when (IRQ_single /= x"00") else
+   IRQ_out <= '1' when ((IRQ_single and x"EF") /= x"00") else
+              '1' when (irq_status(4) = '1') else
               '1' when (Reg_INTRST_written = '1' and ((newstatus and irq_onbits) /= x"00")) else '0';
               
    IRQ_clr <= Reg_INTRST_written;
@@ -377,11 +378,11 @@ begin
             irq_status <= irq_status or IRQ_single;
             
             if (Reg_INTRST_written = '1') then
-               irq_status <= newstatus;
+               irq_status <= newstatus or IRQ_single;
             end if;
             
             if (Reg_INTSET_written = '1') then
-               irq_status <= irq_status or Reg_INTSET;
+               irq_status <= irq_status or Reg_INTSET or IRQ_single;
             end if;
             
             
